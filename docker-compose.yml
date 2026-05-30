@@ -1,7 +1,8 @@
+version: '3.8'
+
 services:
   data-website:
     build: .
-    ports:
-      - "8501:8501"
-    volumes:
-      - .:/app
+    restart: always
+    # We remove volumes for production because the code is already inside the image
+    # We remove ports because Dokploy/Traefik handles the web traffic for you
