@@ -28,8 +28,8 @@ def convert_df(df, file_format="csv"):
         return df.to_csv(index=False).encode('utf-8')
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="DataScience Pro Max", layout="wide", page_icon="🤖")
-st.title("🌐 Advanced Data Warehouse & ML Suite")
+st.set_page_config(page_title="DataScience", layout="wide", page_icon="🤖")
+st.title("🌐Data Warehouse & ML Suite")
 
 # --- SIDEBAR ---
 st.sidebar.header("📥 Data Source")
@@ -92,7 +92,7 @@ if df is not None:
 
     # --- 3. MACHINE LEARNING WORKSHOP ---
     st.divider()
-    st.header("3. 🤖 Machine Learning Workshop")
+    st.header("3. 🤖 Machine Learning")
     
     ml_mode = st.selectbox("Select Learning Type:", ["Supervised (Prediction)", "Unsupervised (Clustering)"])
 
