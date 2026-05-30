@@ -29,7 +29,7 @@ def convert_df(df, file_format="csv"):
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="DataScience", layout="wide", page_icon="🤖")
-st.title("🌐Data Warehouse & ML Suite")
+st.title("🌐 Data Warehouse & ML Suite")
 
 # --- SIDEBAR ---
 st.sidebar.header("📥 Data Source")
@@ -56,43 +56,121 @@ else:
 if df is not None:
     # --- 1. DATA PREP & CLEANING ---
     st.header("1. Data Health & Preprocessing")
+    
+    # Initial Audit
     df_clean = df.drop_duplicates()
+    total_cells = np.prod(df_clean.shape)
+    null_count = df_clean.isnull().sum().sum()
+    missing_percent_total = (null_count / total_cells) * 100
+    
+    # UI Layout for Health Stats
+    col_h1, col_h2, col_h3 = st.columns(3)
+    col_h1.metric("Total Rows", df_clean.shape[0])
+    col_h2.metric("Total Columns", df_clean.shape[1])
+    col_h3.metric("Initial Missingness", f"{missing_percent_total:.2f}%", delta=f"{null_count} cells", delta_color="inverse")
+
+    # Missing Data Breakdown Table
+    missing_data_table = pd.DataFrame({
+        'Missing Values': df_clean.isnull().sum(),
+        'Percentage (%)': (df_clean.isnull().sum() / len(df_clean)) * 100
+    })
+    
+    with st.expander("🔍 Detailed Data Health Audit"):
+        st.write("Column-wise Missing Data Summary:")
+        st.dataframe(missing_data_table.style.format({'Percentage (%)': '{:.2f}%'}))
+
+    # --- AUTOMATED IMPUTATION ENGINE ---
     numeric_cols = df_clean.select_dtypes(include=[np.number]).columns.tolist()
     all_cols = df_clean.columns.tolist()
-    
-    # Imputation
     df_imputed = df_clean.copy()
-    for col in all_cols:
-        if col in numeric_cols:
-            df_imputed[col] = df_imputed[col].fillna(df_imputed[col].mean())
-        else:
-            df_imputed[col] = df_imputed[col].fillna(df_imputed[col].mode()[0] if not df_imputed[col].mode().empty else "Unknown")
 
-    st.write("### Data Preview", df_imputed.head())
+    with st.status("Cleaning and Imputing Data...", expanded=False) as status:
+        st.write("Identifying missing patterns...")
+        time.sleep(0.5)
+        for col in all_cols:
+            if col in numeric_cols:
+                df_imputed[col] = df_imputed[col].fillna(df_imputed[col].mean())
+            else:
+                mode_val = df_imputed[col].mode()
+                df_imputed[col] = df_imputed[col].fillna(mode_val[0] if not mode_val.empty else "Unknown")
+        st.write("Finalizing data integrity checks...")
+        time.sleep(0.5)
+        status.update(label="Data Preprocessing Complete!", state="complete", expanded=False)
+
+    # Verification Message
+    final_nulls = df_imputed.isnull().sum().sum()
+    if final_nulls == 0:
+        st.success(f"✅ **Data Health: 100% Clean.** All {null_count} missing values have been successfully imputed.")
+    else:
+        st.warning(f"⚠️ Processed with {final_nulls} values remaining.")
+
+    st.write("### 💎 Processed Data Preview", df_imputed.head())
 
     # --- 2. DATA MINING (PATTERN DISCOVERY) ---
     st.header("2. Pattern Discovery")
-    tab_corr, tab_pca = st.tabs(["Correlation Heatmap", "PCA Analysis"])
+    tab_corr, tab_pca = st.tabs(["📊 Correlation Heatmap", "🗺️ Data Similarity Map (PCA)"])
     
     with tab_corr:
-        corr = df_imputed[numeric_cols].corr()
-        fig_corr, ax_corr = plt.subplots(figsize=(10, 6))
-        sns.heatmap(corr, annot=True, cmap="mako", ax=ax_corr)
-        st.pyplot(fig_corr)
+        if len(numeric_cols) > 1:
+            corr = df_imputed[numeric_cols].corr()
+            fig_corr, ax_corr = plt.subplots(figsize=(10, 6))
+            sns.heatmap(corr, annot=True, cmap="mako", ax=ax_corr)
+            st.pyplot(fig_corr)
+        else:
+            st.info("Not enough numeric columns for a correlation heatmap.")
 
     with tab_pca:
         if len(numeric_cols) >= 2:
+            st.subheader("Visualizing Data Relationships")
+            st.info("""
+                **Non-Technical Guide:** Each dot is a record. Dots that are **closer together** share similar medical or statistical patterns. 
+                We have condensed all your columns into this 2D 'Similarity Map'.
+            """)
+            
+            # PCA UI Controls
+            p_col1, p_col2 = st.columns([1, 2])
+            with p_col1:
+                color_by = st.selectbox("Color Dots By:", all_cols, help="Select a column to see how groups separate on the map.")
+                hover_toggle = st.checkbox("Show Detailed Hover Info", value=True)
+
+            # PCA Calculation
             scaler_pca = StandardScaler()
-            pca_data = scaler_pca.fit_transform(df_imputed[numeric_cols])
-            pca = PCA(n_components=2)
-            components = pca.fit_transform(pca_data)
-            pca_df = pd.DataFrame(components, columns=['PC1', 'PC2'])
-            fig_pca = px.scatter(pca_df, x='PC1', y='PC2', title="PCA Map", template="plotly_dark")
+            pca_scaled = scaler_pca.fit_transform(df_imputed[numeric_cols])
+            pca_engine = PCA(n_components=2)
+            pca_results = pca_engine.fit_transform(pca_scaled)
+            
+            # Prepare Dataframe for Plotly
+            pca_plot_df = pd.DataFrame(pca_results, columns=['PC1', 'PC2'])
+            # Re-attach original data for labels/colors
+            pca_plot_df = pd.concat([pca_plot_df, df_imputed.reset_index(drop=True)], axis=1)
+
+            # Enhanced Plotly Chart
+            fig_pca = px.scatter(
+                pca_plot_df, x='PC1', y='PC2', 
+                color=color_by,
+                title=f"Similarity Map grouped by {color_by}",
+                template="plotly_dark",
+                hover_data=all_cols if hover_toggle else None,
+                labels={"PC1": "Primary Pattern Direction", "PC2": "Secondary Pattern Direction"},
+                color_continuous_scale="Viridis"
+            )
+            
             st.plotly_chart(fig_pca, use_container_width=True)
+            
+            with st.expander("💡 Technical Breakdown: What drives this map?"):
+                loadings = pd.DataFrame(
+                    pca_engine.components_.T, 
+                    columns=['PC1', 'PC2'], 
+                    index=numeric_cols
+                )
+                st.write("This table shows which features influence the horizontal (PC1) and vertical (PC2) positions:")
+                st.dataframe(loadings.style.background_gradient(cmap='mako'))
+        else:
+            st.info("PCA requires at least 2 numeric columns.")
 
     # --- 3. MACHINE LEARNING WORKSHOP ---
     st.divider()
-    st.header("3. 🤖 Machine Learning")
+    st.header("3. 🤖 Machine Learning Workshop")
     
     ml_mode = st.selectbox("Select Learning Type:", ["Supervised (Prediction)", "Unsupervised (Clustering)"])
 
@@ -113,48 +191,48 @@ if df is not None:
 
         with col_res:
             if train_btn:
-                with st.spinner(f'Applying {algo} and analyzing patterns...'):
-                    time.sleep(1.5) # Simulated loading for UX
-                    
-                    X = df_imputed[features]
-                    y = df_imputed[target]
-                    
-                    if task == "Classification":
-                        le = LabelEncoder()
-                        y = le.fit_transform(y.astype(str))
-                    
-                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                    
-                    # Scaling
-                    sc = StandardScaler()
-                    X_train = sc.fit_transform(X_train)
-                    X_test = sc.transform(X_test)
+                if not features:
+                    st.error("Please select features (X) to train the model.")
+                else:
+                    with st.spinner(f'Training {algo}...'):
+                        time.sleep(1)
+                        X = df_imputed[features]
+                        y = df_imputed[target]
+                        
+                        if task == "Classification":
+                            le = LabelEncoder()
+                            y = le.fit_transform(y.astype(str))
+                        
+                        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                        sc = StandardScaler()
+                        X_train = sc.fit_transform(X_train)
+                        X_test = sc.transform(X_test)
 
-                    # Model Selection Logic
-                    if algo == "Linear Regression": model = LinearRegression()
-                    elif algo == "Logistic Regression": model = LogisticRegression()
-                    elif algo == "Random Forest" and task == "Classification": model = RandomForestClassifier()
-                    elif algo == "Random Forest" and task == "Regression": model = RandomForestRegressor()
-                    elif algo == "Decision Tree" and task == "Classification": model = DecisionTreeClassifier()
-                    elif algo == "Decision Tree" and task == "Regression": model = DecisionTreeRegressor()
-                    elif algo == "SVM" and task == "Classification": model = SVC()
-                    elif algo == "SVM" and task == "Regression": model = SVR()
-                    elif algo == "KNN" and task == "Classification": model = KNeighborsClassifier()
-                    elif algo == "KNN" and task == "Regression": model = KNeighborsRegressor()
-                    elif algo == "Naive Bayes": model = GaussianNB()
+                        # Model selection
+                        if algo == "Linear Regression": model = LinearRegression()
+                        elif algo == "Logistic Regression": model = LogisticRegression()
+                        elif algo == "Random Forest" and task == "Classification": model = RandomForestClassifier()
+                        elif algo == "Random Forest" and task == "Regression": model = RandomForestRegressor()
+                        elif algo == "Decision Tree" and task == "Classification": model = DecisionTreeClassifier()
+                        elif algo == "Decision Tree" and task == "Regression": model = DecisionTreeRegressor()
+                        elif algo == "SVM" and task == "Classification": model = SVC()
+                        elif algo == "SVM" and task == "Regression": model = SVR()
+                        elif algo == "KNN" and task == "Classification": model = KNeighborsClassifier()
+                        elif algo == "KNN" and task == "Regression": model = KNeighborsRegressor()
+                        elif algo == "Naive Bayes": model = GaussianNB()
 
-                    model.fit(X_train, y_train)
-                    preds = model.predict(X_test)
+                        model.fit(X_train, y_train)
+                        preds = model.predict(X_test)
 
-                    # Output
-                    st.success(f"Model {algo} trained successfully!")
-                    if task == "Regression":
-                        st.metric("R² Score", f"{r2_score(y_test, preds):.4f}")
-                        st.metric("RMSE", f"{np.sqrt(mean_squared_error(y_test, preds)):.2f}")
-                    else:
-                        st.metric("Accuracy Score", f"{accuracy_score(y_test, preds):.2%}")
-                        st.text("Detailed Report:")
-                        st.code(classification_report(y_test, preds))
+                        st.success(f"Model {algo} trained successfully!")
+                        if task == "Regression":
+                            m1, m2 = st.columns(2)
+                            m1.metric("R² Score", f"{r2_score(y_test, preds):.4f}")
+                            m2.metric("RMSE", f"{np.sqrt(mean_squared_error(y_test, preds)):.2f}")
+                        else:
+                            st.metric("Accuracy Score", f"{accuracy_score(y_test, preds):.2%}")
+                            st.text("Detailed Report:")
+                            st.code(classification_report(y_test, preds))
 
     elif ml_mode == "Unsupervised (Clustering)":
         col_c1, col_c2 = st.columns([1, 2])
@@ -165,22 +243,21 @@ if df is not None:
             
         with col_c2:
             if cluster_btn:
-                with st.spinner('Calculating clusters...'):
-                    X_clust = df_imputed[cluster_features]
-                    X_clust_scaled = StandardScaler().fit_transform(X_clust)
+                if len(cluster_features) < 2:
+                    st.error("Please select at least 2 features.")
+                else:
+                    X_clust_scaled = StandardScaler().fit_transform(df_imputed[cluster_features])
                     kmeans = KMeans(n_clusters=k_val, random_state=42, n_init=10)
                     clusters = kmeans.fit_predict(X_clust_scaled)
-                    
                     df_imputed['Cluster'] = clusters
                     fig_clust = px.scatter(df_imputed, x=cluster_features[0], y=cluster_features[1], 
                                          color='Cluster', title=f"K-Means Results (K={k_val})", template="plotly_white")
                     st.plotly_chart(fig_clust, use_container_width=True)
-                    st.write("Cluster Distribution:", df_imputed['Cluster'].value_counts())
 
     # --- 4. EXPORT ---
     st.divider()
     st.header("4. Export Results")
-    st.download_button("📥 Download Processed Dataset", data=convert_df(df_imputed), file_name="ai_processed_data.csv")
+    st.download_button("📥 Download Cleaned & Processed Dataset", data=convert_df(df_imputed), file_name="ai_processed_data_promax.csv")
 
 st.markdown("---")
 st.markdown("<div style='text-align: center; color: grey;'>© Timothy Bal-e 2026 | Smart Data Warehouse</div>", unsafe_allow_html=True)
