@@ -183,4 +183,4 @@ if df is not None:
     st.download_button("📥 Download Processed Dataset", data=convert_df(df_imputed), file_name="ai_processed_data.csv")
 
 st.markdown("---")
-st.markdown("<div style='text-align: center; color: grey;'>© Timothy Bal-e 2026 | Smart Data Warehouse Pro Max</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align: center; color: grey;'>© Timothy Bal-e 2026 | Smart Data Warehouse</div>", unsafe_allow_html=True)
