@@ -159,7 +159,8 @@ if df is not None:
             
             st.plotly_chart(fig_pca, use_container_width=True)
             
-            with st.expander("💡 Technical Breakdown: What drives this map?"):
+                       with st.expander("💡 Technical Breakdown: What drives this map?"):
+                # 1. Calculate and Display the Loadings Table
                 loadings = pd.DataFrame(
                     pca_engine.components_.T, 
                     columns=['PC1', 'PC2'], 
@@ -167,6 +168,31 @@ if df is not None:
                 )
                 st.write("This table shows which features influence the horizontal (PC1) and vertical (PC2) positions:")
                 st.dataframe(loadings.style.background_gradient(cmap='mako'))
+
+                # 2. Natural Language Interpreter
+                st.markdown("### 🗣️ Simple Interpretation")
+                
+                def get_top_features(component_name, df_loadings):
+                    # Sorts to find the highest positive and lowest negative values
+                    pos_driver = df_loadings[component_name].idxmax()
+                    neg_driver = df_loadings[component_name].idxmin()
+                    return pos_driver, neg_driver
+
+                pc1_pos, pc1_neg = get_top_features('PC1', loadings)
+                pc2_pos, pc2_neg = get_top_features('PC2', loadings)
+
+                # Explanation for PC1 (Horizontal)
+                st.write(f"**↔️ Horizontal Position (PC1):**")
+                st.write(f"- Moving to the **right** is mostly driven by higher **{pc1_pos.replace('_', ' ')}**.")
+                st.write(f"- Moving to the **left** is mostly driven by higher **{pc1_neg.replace('_', ' ')}**.")
+
+                # Explanation for PC2 (Vertical)
+                st.write(f"**↕️ Vertical Position (PC2):**")
+                st.write(f"- Moving **up** is mostly driven by higher **{pc2_pos.replace('_', ' ')}**.")
+                st.write(f"- Moving **down** is mostly driven by higher **{pc2_neg.replace('_', ' ')}**.")
+
+                st.caption("Note: 'Driven by' means these features have the strongest correlation with that direction on the map.")
+
         else:
             st.info("PCA requires at least 2 numeric columns.")
 
