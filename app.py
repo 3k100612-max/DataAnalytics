@@ -45,7 +45,7 @@ if source_type == "Upload CSV":
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
 else:
-    url = st.text_input("Paste URL (Wikipedia/GitHub):")
+    url = st.text_input("Paste URL (Wikipedia/GitHub(Raw CSV SITES)):")
     if url:
         try:
             if url.endswith('.csv') or "raw" in url: df = pd.read_csv(url)
