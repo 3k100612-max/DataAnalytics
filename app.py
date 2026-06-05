@@ -45,44 +45,64 @@ if source_type == "Upload CSV":
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
 else:
-    url = st.text_input("Paste Website URL (e.g., Wikipedia, Finance sites, GitHub):")
+    url = st.text_input("Paste Website URL (e.g., GitHub, Open Data portals, Wikipedia):")
     if url:
         try:
             import requests
             from bs4 import BeautifulSoup
-            import io # Ensure io is available
+            from urllib.parse import urljoin
+            import io
 
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
-            response = requests.get(url, headers=headers, timeout=10)
             
-            if url.endswith('.csv') or "raw" in url:
+            # 1. Initial Request
+            response = requests.get(url, headers=headers, timeout=15)
+            content_type = response.headers.get('Content-Type', '').lower()
+
+            # 2. Case A: The URL is a direct CSV file
+            if url.endswith('.csv') or "text/csv" in content_type or "raw" in url:
                 df = pd.read_csv(io.StringIO(response.text))
-                st.success("CSV Data extracted successfully!")
+                st.success("Direct CSV data loaded successfully!")
+
             else:
+                # 3. Case B: It's a website. Search for CSV links AND HTML Tables.
                 soup = BeautifulSoup(response.text, 'html.parser')
-                tables = soup.find_all('table')
                 
-                if not tables:
-                    st.error("No HTML tables found on this page. Try a different URL.")
+                # Find all links ending in .csv
+                csv_links = []
+                for a in soup.find_all('a', href=True):
+                    href = a['href']
+                    if href.lower().endswith('.csv'):
+                        # Convert relative links (e.g. /data.csv) to absolute links
+                        full_csv_url = urljoin(url, href)
+                        csv_links.append(full_csv_url)
+                
+                # Also find HTML tables as fallback
+                html_tables = pd.read_html(io.StringIO(response.text)) if len(pd.read_html(io.StringIO(response.text))) > 0 else []
+
+                if csv_links:
+                    st.info(f"✨ Found {len(csv_links)} CSV file(s) on this page!")
+                    selected_csv = st.selectbox("Select CSV File to Analyze:", csv_links)
+                    if st.button("Download & Analyze Selected CSV"):
+                        csv_res = requests.get(selected_csv, headers=headers)
+                        df = pd.read_csv(io.StringIO(csv_res.text))
+                        st.success(f"Loaded CSV: {selected_csv.split('/')[-1]}")
+                
+                elif html_tables:
+                    st.warning("No CSV links found. Falling back to HTML Tables...")
+                    table_options = [f"Table {i} (Cols: {', '.join(list(t.columns.astype(str))[:2])}...)" for i, t in enumerate(html_tables)]
+                    selected_table = st.selectbox("Select Table to Load:", table_options)
+                    table_idx = table_options.index(selected_table)
+                    df = html_tables[table_idx]
+                    st.success("HTML Table loaded!")
+                
                 else:
-                    st.info(f"Found {len(tables)} table(s) on this page.")
-                    table_idx = st.number_input("Select Table Index to Load:", 0, len(tables)-1, 0)
-                    
-                    # --- THE FIX IS HERE ---
-                    # We wrap the table HTML in io.StringIO()
-                    html_string = str(tables[table_idx])
-                    df_list = pd.read_html(io.StringIO(html_string))
-                    
-                    if df_list:
-                        df = df_list[0]
-                        # Optional: Remove completely empty columns often found in financial sites
-                        df = df.dropna(axis=1, how='all') 
-                        st.success(f"Table #{table_idx} extracted successfully!")
+                    st.error("No CSV files or HTML tables detected on this page.")
+
         except Exception as e:
-            st.error(f"Scraping Error: {e}")
-            st.info("Tip: If the error persists, try a different Table Index.")
+            st.error(f"Extraction Error: {e}")
 
 
 if df is not None:
