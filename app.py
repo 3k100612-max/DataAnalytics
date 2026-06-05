@@ -159,7 +159,7 @@ if df is not None:
             
             st.plotly_chart(fig_pca, use_container_width=True)
             
-                       with st.expander("💡 Technical Breakdown: What drives this map?"):
+            with st.expander("💡 Technical Breakdown: What drives this map?"):
                 # 1. Calculate and Display the Loadings Table
                 loadings = pd.DataFrame(
                     pca_engine.components_.T, 
