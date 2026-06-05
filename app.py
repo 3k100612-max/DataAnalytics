@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import numpy as np
 import io
 import time
+import requests
 
 # ML Imports
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
@@ -48,12 +49,30 @@ else:
     url = st.text_input("Paste URL (Wikipedia/GitHub(Raw CSV SITES)):")
     if url:
         try:
-            if url.endswith('.csv') or "raw" in url: df = pd.read_csv(url)
+            # Check content type for better detection
+            response = requests.get(url, timeout=10)
+            content_type = response.headers.get('Content-Type', '').lower()
+
+            if url.endswith('.csv') or "raw" in url or 'text/csv' in content_type:
+                df = pd.read_csv(url)
+                st.success("CSV Data Extracted!")
             else:
                 tables = pd.read_html(url)
-                df = tables[0] # Take the first table
-            st.success("Data Extracted!")
-        except Exception as e: st.error(f"Error: {e}")
+                if len(tables) == 0:
+                    st.warning("No tables found on this page.")
+                elif len(tables) == 1:
+                    df = tables[0]
+                    st.success("Single table found and extracted!")
+                else:
+                    st.info(f"Found {len(tables)} tables. Please select the one for analysis:")
+                    table_idx = st.selectbox(
+                        "Select Table to Analyze", 
+                        range(len(tables)),
+                        format_func=lambda x: f"Table {x} ({len(tables[x])} rows, {len(tables[x].columns)} columns)"
+                    )
+                    df = tables[table_idx]
+        except Exception as e: 
+            st.error(f"Error: {e}")
 
 if df is not None:
     # --- 1. DATA PREP & CLEANING ---
@@ -110,182 +129,4 @@ if df is not None:
 
     # --- 2. DATA MINING (PATTERN DISCOVERY) ---
     st.header("2. Pattern Discovery")
-    tab_corr, tab_pca = st.tabs(["📊 Correlation Heatmap", "🗺️ Data Similarity Map (PCA)"])
-    
-    with tab_corr:
-        if len(numeric_cols) > 1:
-            corr = df_imputed[numeric_cols].corr()
-            fig_corr, ax_corr = plt.subplots(figsize=(10, 6))
-            sns.heatmap(corr, annot=True, cmap="mako", ax=ax_corr)
-            st.pyplot(fig_corr)
-        else:
-            st.info("Not enough numeric columns for a correlation heatmap.")
-
-    with tab_pca:
-        if len(numeric_cols) >= 2:
-            st.subheader("Visualizing Data Relationships")
-            st.info("""
-                **Non-Technical Guide:** Each dot is a record. Dots that are **closer together** share similar medical or statistical patterns. 
-                We have condensed all your columns into this 2D 'Similarity Map'.
-            """)
-            
-            # PCA UI Controls
-            p_col1, p_col2 = st.columns([1, 2])
-            with p_col1:
-                color_by = st.selectbox("Color Dots By:", all_cols, help="Select a column to see how groups separate on the map.")
-                hover_toggle = st.checkbox("Show Detailed Hover Info", value=True)
-
-            # PCA Calculation
-            scaler_pca = StandardScaler()
-            pca_scaled = scaler_pca.fit_transform(df_imputed[numeric_cols])
-            pca_engine = PCA(n_components=2)
-            pca_results = pca_engine.fit_transform(pca_scaled)
-            
-            # Prepare Dataframe for Plotly
-            pca_plot_df = pd.DataFrame(pca_results, columns=['PC1', 'PC2'])
-            # Re-attach original data for labels/colors
-            pca_plot_df = pd.concat([pca_plot_df, df_imputed.reset_index(drop=True)], axis=1)
-
-            # Enhanced Plotly Chart
-            fig_pca = px.scatter(
-                pca_plot_df, x='PC1', y='PC2', 
-                color=color_by,
-                title=f"Similarity Map grouped by {color_by}",
-                template="plotly_dark",
-                hover_data=all_cols if hover_toggle else None,
-                labels={"PC1": "Primary Pattern Direction", "PC2": "Secondary Pattern Direction"},
-                color_continuous_scale="Viridis"
-            )
-            
-            st.plotly_chart(fig_pca, use_container_width=True)
-            
-            with st.expander("💡 Technical Breakdown: What drives this map?"):
-                # 1. Calculate and Display the Loadings Table
-                loadings = pd.DataFrame(
-                    pca_engine.components_.T, 
-                    columns=['PC1', 'PC2'], 
-                    index=numeric_cols
-                )
-                st.write("This table shows which features influence the horizontal (PC1) and vertical (PC2) positions:")
-                st.dataframe(loadings.style.background_gradient(cmap='mako'))
-
-                # 2. Natural Language Interpreter
-                st.markdown("### 🗣️ Simple Interpretation")
-                
-                def get_top_features(component_name, df_loadings):
-                    # Sorts to find the highest positive and lowest negative values
-                    pos_driver = df_loadings[component_name].idxmax()
-                    neg_driver = df_loadings[component_name].idxmin()
-                    return pos_driver, neg_driver
-
-                pc1_pos, pc1_neg = get_top_features('PC1', loadings)
-                pc2_pos, pc2_neg = get_top_features('PC2', loadings)
-
-                # Explanation for PC1 (Horizontal)
-                st.write(f"**↔️ Horizontal Position (PC1):**")
-                st.write(f"- Moving to the **right** is mostly driven by higher **{pc1_pos.replace('_', ' ')}**.")
-                st.write(f"- Moving to the **left** is mostly driven by higher **{pc1_neg.replace('_', ' ')}**.")
-
-                # Explanation for PC2 (Vertical)
-                st.write(f"**↕️ Vertical Position (PC2):**")
-                st.write(f"- Moving **up** is mostly driven by higher **{pc2_pos.replace('_', ' ')}**.")
-                st.write(f"- Moving **down** is mostly driven by higher **{pc2_neg.replace('_', ' ')}**.")
-
-                st.caption("Note: 'Driven by' means these features have the strongest correlation with that direction on the map.")
-
-        else:
-            st.info("PCA requires at least 2 numeric columns.")
-
-    # --- 3. MACHINE LEARNING WORKSHOP ---
-    st.divider()
-    st.header("3. 🤖 Machine Learning Workshop")
-    
-    ml_mode = st.selectbox("Select Learning Type:", ["Supervised (Prediction)", "Unsupervised (Clustering)"])
-
-    if ml_mode == "Supervised (Prediction)":
-        col_set, col_res = st.columns([1, 2])
-        
-        with col_set:
-            target = st.selectbox("Target Variable (Y):", all_cols)
-            features = st.multiselect("Features (X):", [c for c in numeric_cols if c != target], default=[c for c in numeric_cols if c != target][:3])
-            task = st.radio("Task:", ["Classification", "Regression"])
-            
-            if task == "Classification":
-                algo = st.selectbox("Algorithm:", ["Logistic Regression", "Random Forest", "Decision Tree", "SVM", "KNN", "Naive Bayes"])
-            else:
-                algo = st.selectbox("Algorithm:", ["Linear Regression", "Random Forest", "Decision Tree", "SVM", "KNN"])
-            
-            train_btn = st.button("🚀 Train & Predict")
-
-        with col_res:
-            if train_btn:
-                if not features:
-                    st.error("Please select features (X) to train the model.")
-                else:
-                    with st.spinner(f'Training {algo}...'):
-                        time.sleep(1)
-                        X = df_imputed[features]
-                        y = df_imputed[target]
-                        
-                        if task == "Classification":
-                            le = LabelEncoder()
-                            y = le.fit_transform(y.astype(str))
-                        
-                        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                        sc = StandardScaler()
-                        X_train = sc.fit_transform(X_train)
-                        X_test = sc.transform(X_test)
-
-                        # Model selection
-                        if algo == "Linear Regression": model = LinearRegression()
-                        elif algo == "Logistic Regression": model = LogisticRegression()
-                        elif algo == "Random Forest" and task == "Classification": model = RandomForestClassifier()
-                        elif algo == "Random Forest" and task == "Regression": model = RandomForestRegressor()
-                        elif algo == "Decision Tree" and task == "Classification": model = DecisionTreeClassifier()
-                        elif algo == "Decision Tree" and task == "Regression": model = DecisionTreeRegressor()
-                        elif algo == "SVM" and task == "Classification": model = SVC()
-                        elif algo == "SVM" and task == "Regression": model = SVR()
-                        elif algo == "KNN" and task == "Classification": model = KNeighborsClassifier()
-                        elif algo == "KNN" and task == "Regression": model = KNeighborsRegressor()
-                        elif algo == "Naive Bayes": model = GaussianNB()
-
-                        model.fit(X_train, y_train)
-                        preds = model.predict(X_test)
-
-                        st.success(f"Model {algo} trained successfully!")
-                        if task == "Regression":
-                            m1, m2 = st.columns(2)
-                            m1.metric("R² Score", f"{r2_score(y_test, preds):.4f}")
-                            m2.metric("RMSE", f"{np.sqrt(mean_squared_error(y_test, preds)):.2f}")
-                        else:
-                            st.metric("Accuracy Score", f"{accuracy_score(y_test, preds):.2%}")
-                            st.text("Detailed Report:")
-                            st.code(classification_report(y_test, preds))
-
-    elif ml_mode == "Unsupervised (Clustering)":
-        col_c1, col_c2 = st.columns([1, 2])
-        with col_c1:
-            cluster_features = st.multiselect("Select Features for Clustering:", numeric_cols, default=numeric_cols[:2])
-            k_val = st.slider("Number of Clusters (K):", 2, 10, 3)
-            cluster_btn = st.button("🧬 Run K-Means")
-            
-        with col_c2:
-            if cluster_btn:
-                if len(cluster_features) < 2:
-                    st.error("Please select at least 2 features.")
-                else:
-                    X_clust_scaled = StandardScaler().fit_transform(df_imputed[cluster_features])
-                    kmeans = KMeans(n_clusters=k_val, random_state=42, n_init=10)
-                    clusters = kmeans.fit_predict(X_clust_scaled)
-                    df_imputed['Cluster'] = clusters
-                    fig_clust = px.scatter(df_imputed, x=cluster_features[0], y=cluster_features[1], 
-                                         color='Cluster', title=f"K-Means Results (K={k_val})", template="plotly_white")
-                    st.plotly_chart(fig_clust, use_container_width=True)
-
-    # --- 4. EXPORT ---
-    st.divider()
-    st.header("4. Export Results")
-    st.download_button("📥 Download Cleaned & Processed Dataset", data=convert_df(df_imputed), file_name="ai_processed_data_promax.csv")
-
-st.markdown("---")
-st.markdown("<div style='text-align: center; color: grey;'>© Timothy Bal-e 2026 | Smart Data Warehouse</div>", unsafe_allow_html=True)
+    tab_corr, tab_pca = st.tabs(
