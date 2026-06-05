@@ -45,7 +45,7 @@ if source_type == "Upload CSV":
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
 else:
-    url = st.text_input("Paste Website URL (e.g., GitHub, Open Data portals, Wikipedia):")
+    url = st.text_input("Paste Website URL (e.g., ph.investing.com, GitHub, etc.):")
     if url:
         try:
             import requests
@@ -53,57 +53,72 @@ else:
             from urllib.parse import urljoin
             import io
 
+            # 1. Setup headers to mimic a real browser (Investing.com blocks default scrapers)
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
             }
             
-            # 1. Initial Request
             response = requests.get(url, headers=headers, timeout=15)
-            content_type = response.headers.get('Content-Type', '').lower()
+            soup = BeautifulSoup(response.text, 'html.parser')
 
-            # 2. Case A: The URL is a direct CSV file
-            if url.endswith('.csv') or "text/csv" in content_type or "raw" in url:
-                df = pd.read_csv(io.StringIO(response.text))
-                st.success("Direct CSV data loaded successfully!")
+            # --- LOGIC A: SEARCH FOR CSV FILES ---
+            csv_links = []
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if href.lower().endswith('.csv') or "download" in href.lower():
+                    csv_links.append(urljoin(url, href))
+
+            # --- LOGIC B: SEARCH FOR HTML TABLES ---
+            # We use io.StringIO to prevent the 'File Not Found' error
+            try:
+                html_tables = pd.read_html(io.StringIO(response.text))
+            except:
+                html_tables = []
+
+            # --- UI SELECTION ---
+            if csv_links:
+                st.success(f"📂 Found {len(csv_links)} potential CSV download(s)!")
+                selected_csv = st.selectbox("Select CSV to load:", csv_links)
+                if st.button("Load CSV Data"):
+                    csv_res = requests.get(selected_csv, headers=headers)
+                    df = pd.read_csv(io.StringIO(csv_res.text))
+            
+            elif html_tables:
+                st.info(f"📊 Found {len(html_tables)} data tables on this page.")
+                
+                # Create a list of table summaries to help the user choose
+                table_labels = []
+                for i, t in enumerate(html_tables):
+                    # Clean the table: remove empty columns/rows
+                    t = t.dropna(axis=1, how='all').dropna(axis=0, how='all')
+                    preview = ", ".join(list(t.columns.astype(str))[:2])
+                    table_labels.append(f"Table {i} (Fields: {preview})")
+                
+                selected_table_label = st.selectbox("Choose the specific data table to analyze:", table_labels)
+                table_index = table_labels.index(selected_table_label)
+                
+                # Load the selected table
+                df = html_tables[table_index]
+                
+                # --- AUTO-CLEANING FOR INVESTING.COM ---
+                # Financial sites use commas and % signs which break ML. We clean them here.
+                for col in df.columns:
+                    if df[col].dtype == 'object':
+                        try:
+                            # Remove commas, plus signs, and percentage symbols
+                            df[col] = df[col].str.replace(',', '').str.replace('%', '').str.replace('+', '')
+                            df[col] = pd.to_numeric(df[col])
+                        except:
+                            pass # Keep as string if it's a name (e.g., "Apple Inc")
+                
+                st.success(f"Successfully extracted {df.shape[0]} rows from Table {table_index}!")
 
             else:
-                # 3. Case B: It's a website. Search for CSV links AND HTML Tables.
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Find all links ending in .csv
-                csv_links = []
-                for a in soup.find_all('a', href=True):
-                    href = a['href']
-                    if href.lower().endswith('.csv'):
-                        # Convert relative links (e.g. /data.csv) to absolute links
-                        full_csv_url = urljoin(url, href)
-                        csv_links.append(full_csv_url)
-                
-                # Also find HTML tables as fallback
-                html_tables = pd.read_html(io.StringIO(response.text)) if len(pd.read_html(io.StringIO(response.text))) > 0 else []
-
-                if csv_links:
-                    st.info(f"✨ Found {len(csv_links)} CSV file(s) on this page!")
-                    selected_csv = st.selectbox("Select CSV File to Analyze:", csv_links)
-                    if st.button("Download & Analyze Selected CSV"):
-                        csv_res = requests.get(selected_csv, headers=headers)
-                        df = pd.read_csv(io.StringIO(csv_res.text))
-                        st.success(f"Loaded CSV: {selected_csv.split('/')[-1]}")
-                
-                elif html_tables:
-                    st.warning("No CSV links found. Falling back to HTML Tables...")
-                    table_options = [f"Table {i} (Cols: {', '.join(list(t.columns.astype(str))[:2])}...)" for i, t in enumerate(html_tables)]
-                    selected_table = st.selectbox("Select Table to Load:", table_options)
-                    table_idx = table_options.index(selected_table)
-                    df = html_tables[table_idx]
-                    st.success("HTML Table loaded!")
-                
-                else:
-                    st.error("No CSV files or HTML tables detected on this page.")
+                st.error("No data detected. This page might be protected or uses dynamic JavaScript.")
 
         except Exception as e:
-            st.error(f"Extraction Error: {e}")
-
+            st.error(f"Scraping Error: {e}")
 
 if df is not None:
     # --- 1. DATA PREP & CLEANING ---
