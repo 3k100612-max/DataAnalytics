@@ -29,7 +29,7 @@ def convert_df(df, file_format="csv"):
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="DataScience", layout="wide", page_icon="🤖")
-st.title("🌐 Data Warehouse & ML Suite")
+st.title("🌐 Data Warehouse & Machine Learning Prototype")
 
 # --- SIDEBAR ---
 st.sidebar.header("📥 Data Source")
