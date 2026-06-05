@@ -50,19 +50,17 @@ else:
         try:
             import requests
             from bs4 import BeautifulSoup
+            import io # Ensure io is available
 
-            # 1. Use headers to avoid "403 Forbidden" errors from websites
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
             response = requests.get(url, headers=headers, timeout=10)
             
-            # 2. Check if it's a direct CSV link
             if url.endswith('.csv') or "raw" in url:
                 df = pd.read_csv(io.StringIO(response.text))
                 st.success("CSV Data extracted successfully!")
             else:
-                # 3. Use BeautifulSoup to find all tables on the page
                 soup = BeautifulSoup(response.text, 'html.parser')
                 tables = soup.find_all('table')
                 
@@ -70,17 +68,21 @@ else:
                     st.error("No HTML tables found on this page. Try a different URL.")
                 else:
                     st.info(f"Found {len(tables)} table(s) on this page.")
-                    # Allow user to select which table to analyze
                     table_idx = st.number_input("Select Table Index to Load:", 0, len(tables)-1, 0)
                     
-                    # Convert the specific selected table to a DataFrame
-                    df_list = pd.read_html(str(tables[table_idx]))
+                    # --- THE FIX IS HERE ---
+                    # We wrap the table HTML in io.StringIO()
+                    html_string = str(tables[table_idx])
+                    df_list = pd.read_html(io.StringIO(html_string))
+                    
                     if df_list:
                         df = df_list[0]
+                        # Optional: Remove completely empty columns often found in financial sites
+                        df = df.dropna(axis=1, how='all') 
                         st.success(f"Table #{table_idx} extracted successfully!")
         except Exception as e:
             st.error(f"Scraping Error: {e}")
-            st.info("Tip: Ensure the URL starts with http:// or https://")
+            st.info("Tip: If the error persists, try a different Table Index.")
 
 
 if df is not None:
