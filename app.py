@@ -46,14 +46,14 @@ if source_type == "Upload CSV":
         df = pd.read_csv(uploaded_file)
 else:
     url = st.text_input("Paste URL (Wikipedia/GitHub):")
-if url:
-try:
-    if url.endswith('.csv') or "raw" in url: df = pd.read_csv(url)
-else:
-    tables = pd.read_html(url)
-    df = tables[0] # Take the first table
-    st.success("Data Extracted!")
-    except Exception as e: st.error(f"Error: {e}")
+    if url:
+        try:
+            if url.endswith('.csv') or "raw" in url: df = pd.read_csv(url)
+            else:
+                tables = pd.read_html(url)
+                df = tables[0] # Take the first table
+            st.success("Data Extracted!")
+        except Exception as e: st.error(f"Error: {e}")
 
 if df is not None:
     # --- 1. DATA PREP & CLEANING ---
