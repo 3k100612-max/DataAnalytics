@@ -29,7 +29,7 @@ def convert_df(df, file_format="csv"):
         return df.to_csv(index=False).encode('utf-8')
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="DataScience", layout="wide", page_icon="🤖")
+st.set_page_config(page_title="DataScience Pro", layout="wide", page_icon="🤖")
 st.title("🌐 Data Warehouse & Machine Learning Prototype")
 
 # --- SIDEBAR ---
@@ -49,7 +49,6 @@ else:
     url = st.text_input("Paste URL (Wikipedia/GitHub(Raw CSV SITES)):")
     if url:
         try:
-            # Check content type for better detection
             response = requests.get(url, timeout=10)
             content_type = response.headers.get('Content-Type', '').lower()
 
@@ -78,52 +77,28 @@ if df is not None:
     # --- 1. DATA PREP & CLEANING ---
     st.header("1. Data Health & Preprocessing")
     
-    # Initial Audit
     df_clean = df.drop_duplicates()
     total_cells = np.prod(df_clean.shape)
     null_count = df_clean.isnull().sum().sum()
     missing_percent_total = (null_count / total_cells) * 100
     
-    # UI Layout for Health Stats
     col_h1, col_h2, col_h3 = st.columns(3)
     col_h1.metric("Total Rows", df_clean.shape[0])
     col_h2.metric("Total Columns", df_clean.shape[1])
     col_h3.metric("Initial Missingness", f"{missing_percent_total:.2f}%", delta=f"{null_count} cells", delta_color="inverse")
 
-    # Missing Data Breakdown Table
-    missing_data_table = pd.DataFrame({
-        'Missing Values': df_clean.isnull().sum(),
-        'Percentage (%)': (df_clean.isnull().sum() / len(df_clean)) * 100
-    })
-    
-    with st.expander("🔍 Detailed Data Health Audit"):
-        st.write("Column-wise Missing Data Summary:")
-        st.dataframe(missing_data_table.style.format({'Percentage (%)': '{:.2f}%'}))
-
-    # --- AUTOMATED IMPUTATION ENGINE ---
     numeric_cols = df_clean.select_dtypes(include=[np.number]).columns.tolist()
     all_cols = df_clean.columns.tolist()
     df_imputed = df_clean.copy()
 
     with st.status("Cleaning and Imputing Data...", expanded=False) as status:
-        st.write("Identifying missing patterns...")
-        time.sleep(0.5)
         for col in all_cols:
             if col in numeric_cols:
                 df_imputed[col] = df_imputed[col].fillna(df_imputed[col].mean())
             else:
                 mode_val = df_imputed[col].mode()
                 df_imputed[col] = df_imputed[col].fillna(mode_val[0] if not mode_val.empty else "Unknown")
-        st.write("Finalizing data integrity checks...")
-        time.sleep(0.5)
         status.update(label="Data Preprocessing Complete!", state="complete", expanded=False)
-
-    # Verification Message
-    final_nulls = df_imputed.isnull().sum().sum()
-    if final_nulls == 0:
-        st.success(f"✅ **Data Health: 100% Clean.** All {null_count} missing values have been successfully imputed.")
-    else:
-        st.warning(f"⚠️ Processed with {final_nulls} values remaining.")
 
     st.write("### 💎 Processed Data Preview", df_imputed.head())
 
@@ -142,70 +117,14 @@ if df is not None:
 
     with tab_pca:
         if len(numeric_cols) >= 2:
-            st.subheader("Visualizing Data Relationships")
-            st.info("""
-                **Non-Technical Guide:** Each dot is a record. Dots that are **closer together** share similar patterns. 
-                We have condensed your columns into this 2D 'Similarity Map'.
-            """)
-            
-            # PCA UI Controls
-            p_col1, p_col2 = st.columns([1, 2])
-            with p_col1:
-                color_by = st.selectbox("Color Dots By:", all_cols, help="Select a column to see how groups separate on the map.")
-                hover_toggle = st.checkbox("Show Detailed Hover Info", value=True)
-
-            # PCA Calculation
             scaler_pca = StandardScaler()
             pca_scaled = scaler_pca.fit_transform(df_imputed[numeric_cols])
             pca_engine = PCA(n_components=2)
             pca_results = pca_engine.fit_transform(pca_scaled)
-            
-            # Prepare Dataframe for Plotly
             pca_plot_df = pd.DataFrame(pca_results, columns=['PC1', 'PC2'])
             pca_plot_df = pd.concat([pca_plot_df, df_imputed.reset_index(drop=True)], axis=1)
-
-            # Enhanced Plotly Chart
-            fig_pca = px.scatter(
-                pca_plot_df, x='PC1', y='PC2', 
-                color=color_by,
-                title=f"Similarity Map grouped by {color_by}",
-                template="plotly_dark",
-                hover_data=all_cols if hover_toggle else None,
-                labels={"PC1": "Primary Pattern Direction", "PC2": "Secondary Pattern Direction"},
-                color_continuous_scale="Viridis"
-            )
-            
+            fig_pca = px.scatter(pca_plot_df, x='PC1', y='PC2', color=all_cols[0], template="plotly_dark")
             st.plotly_chart(fig_pca, use_container_width=True)
-            
-            # --- UPDATED PCA INTERPRETER ---
-            with st.expander("💡 Technical Breakdown: What drives this map?"):
-                loadings = pd.DataFrame(
-                    pca_engine.components_.T, 
-                    columns=['PC1', 'PC2'], 
-                    index=numeric_cols
-                )
-                st.write("This table shows which features influence the horizontal (PC1) and vertical (PC2) positions:")
-                st.dataframe(loadings.style.background_gradient(cmap='mako'))
-
-                st.markdown("### 🗣️ Simple Interpretation")
-                
-                def get_top_features(component_name, df_loadings):
-                    pos_driver = df_loadings[component_name].idxmax()
-                    neg_driver = df_loadings[component_name].idxmin()
-                    return pos_driver, neg_driver
-
-                pc1_pos, pc1_neg = get_top_features('PC1', loadings)
-                pc2_pos, pc2_neg = get_top_features('PC2', loadings)
-
-                st.write(f"**↔️ Horizontal Position (PC1):**")
-                st.write(f"- Moving to the **right** is mostly driven by higher **{pc1_pos.replace('_', ' ')}**.")
-                st.write(f"- Moving to the **left** is mostly driven by higher **{pc1_neg.replace('_', ' ')}**.")
-
-                st.write(f"**↕️ Vertical Position (PC2):**")
-                st.write(f"- Moving **up** is mostly driven by higher **{pc2_pos.replace('_', ' ')}**.")
-                st.write(f"- Moving **down** is mostly driven by higher **{pc2_neg.replace('_', ' ')}**.")
-
-                st.caption("Note: 'Driven by' means these features have the strongest correlation with that direction on the map.")
         else:
             st.info("PCA requires at least 2 numeric columns.")
 
@@ -228,6 +147,11 @@ if df is not None:
             else:
                 algo = st.selectbox("Algorithm:", ["Linear Regression", "Random Forest", "Decision Tree", "SVM", "KNN"])
             
+            # --- HYPERPARAMETER: MAX DEPTH ---
+            max_depth_val = None
+            if algo in ["Decision Tree", "Random Forest"]:
+                max_depth_val = st.slider("Max Tree Depth:", 1, 20, 3, help="Controls how deep the tree grows. Higher depth can lead to overfitting.")
+
             train_btn = st.button("🚀 Train & Predict")
 
         with col_res:
@@ -236,7 +160,6 @@ if df is not None:
                     st.error("Please select features (X) to train the model.")
                 else:
                     with st.spinner(f'Training {algo}...'):
-                        time.sleep(1)
                         X = df_imputed[features]
                         y = df_imputed[target]
                         
@@ -246,24 +169,25 @@ if df is not None:
                         
                         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
                         sc = StandardScaler()
-                        X_train = sc.fit_transform(X_train)
-                        X_test = sc.transform(X_test)
+                        X_train_scaled = sc.fit_transform(X_train)
+                        X_test_scaled = sc.transform(X_test)
 
-                        # Model selection
+                        # Model Selection Logic
                         if algo == "Linear Regression": model = LinearRegression()
                         elif algo == "Logistic Regression": model = LogisticRegression()
-                        elif algo == "Random Forest" and task == "Classification": model = RandomForestClassifier()
-                        elif algo == "Random Forest" and task == "Regression": model = RandomForestRegressor()
-                        elif algo == "Decision Tree" and task == "Classification": model = DecisionTreeClassifier()
-                        elif algo == "Decision Tree" and task == "Regression": model = DecisionTreeRegressor()
-                        elif algo == "SVM" and task == "Classification": model = SVC()
-                        elif algo == "SVM" and task == "Regression": model = SVR()
-                        elif algo == "KNN" and task == "Classification": model = KNeighborsClassifier()
-                        elif algo == "KNN" and task == "Regression": model = KNeighborsRegressor()
-                        elif algo == "Naive Bayes": model = GaussianNB()
+                        elif algo == "Random Forest":
+                            model = RandomForestClassifier(max_depth=max_depth_val) if task == "Classification" else RandomForestRegressor(max_depth=max_depth_val)
+                        elif algo == "Decision Tree":
+                            model = DecisionTreeClassifier(max_depth=max_depth_val) if task == "Classification" else DecisionTreeRegressor(max_depth=max_depth_val)
+                        elif algo == "SVM":
+                            model = SVC(probability=True) if task == "Classification" else SVR()
+                        elif algo == "KNN":
+                            model = KNeighborsClassifier() if task == "Classification" else KNeighborsRegressor()
+                        elif algo == "Naive Bayes":
+                            model = GaussianNB()
 
-                        model.fit(X_train, y_train)
-                        preds = model.predict(X_test)
+                        model.fit(X_train_scaled, y_train)
+                        preds = model.predict(X_test_scaled)
 
                         st.success(f"Model {algo} trained successfully!")
                         if task == "Regression":
@@ -272,33 +196,61 @@ if df is not None:
                             m2.metric("RMSE", f"{np.sqrt(mean_squared_error(y_test, preds)):.2f}")
                         else:
                             st.metric("Accuracy Score", f"{accuracy_score(y_test, preds):.2%}")
-                            st.text("Detailed Report:")
-                            st.code(classification_report(y_test, preds))
+                            with st.expander("View Classification Report"):
+                                st.code(classification_report(y_test, preds))
+
+                        # --- EDUCATIONAL COMPUTATION SECTION ---
+                        st.markdown("---")
+                        st.subheader("🧮 How was this computed?")
+                        
+                        with st.expander(f"Explain the logic behind {algo}"):
+                            if algo == "Linear Regression":
+                                st.write("**The Formula:**")
+                                st.latex(r"Y = \beta_0 + \beta_1X_1 + \beta_2X_2 + ... + \epsilon")
+                                st.write("**Non-Technical Guide:**")
+                                st.write("This model draws a straight 'Line of Best Fit'. It calculates how much $Y$ changes for every 1 unit increase in your $X$ variables.")
+                                weights = pd.DataFrame({'Feature': features, 'Weight': model.coef_})
+                                st.dataframe(weights)
+
+                            elif algo == "Decision Tree":
+                                st.write("**The Logic (CART):**")
+                                st.latex(r"\text{Gini} = 1 - \sum (P_i)^2")
+                                st.write(f"**Depth Used:** {max_depth_val}")
+                                st.write("**Non-Technical Guide:**")
+                                st.write("Think of this as a flowchart. The model asks 'Yes/No' questions to split your data into groups. It stops when it reaches the 'Max Depth' you selected or when the groups are pure.")
+
+                            elif algo == "Naive Bayes":
+                                st.write("**The Formula (Bayes Theorem):**")
+                                st.latex(r"P(A|B) = \frac{P(B|A) \cdot P(A)}{P(B)}")
+                                st.write("**Non-Technical Guide:**")
+                                st.write("This model calculates the probability of a result based on the features. It is 'Naive' because it assumes each feature is independent of the others.")
+
+                            elif algo == "KNN":
+                                st.write("**The Distance Formula (Euclidean):**")
+                                st.latex(r"d(p,q) = \sqrt{\sum_{i=1}^{n} (q_i - p_i)^2}")
+                                st.write("**Non-Technical Guide:**")
+                                st.write("KNN looks at the closest 'neighbors' to a data point. If most neighbors belong to Class A, the new point is also labeled Class A.")
+
+                            elif algo == "SVM":
+                                st.write("**The Goal: Optimal Hyperplane**")
+                                st.write("SVM tries to find the widest possible 'road' (margin) that separates different classes.")
+                                st.write("**Non-Technical Guide:**")
+                                st.write("Imagine drawing a line between two groups of dots. SVM finds the line that stays as far away from the dots of both groups as possible.")
 
     elif ml_mode == "Unsupervised (Clustering)":
-        col_c1, col_c2 = st.columns([1, 2])
-        with col_c1:
-            cluster_features = st.multiselect("Select Features for Clustering:", numeric_cols, default=numeric_cols[:2])
-            k_val = st.slider("Number of Clusters (K):", 2, 10, 3)
-            cluster_btn = st.button("🧬 Run K-Means")
-            
-        with col_c2:
-            if cluster_btn:
-                if len(cluster_features) < 2:
-                    st.error("Please select at least 2 features.")
-                else:
-                    X_clust_scaled = StandardScaler().fit_transform(df_imputed[cluster_features])
-                    kmeans = KMeans(n_clusters=k_val, random_state=42, n_init=10)
-                    clusters = kmeans.fit_predict(X_clust_scaled)
-                    df_imputed['Cluster'] = clusters
-                    fig_clust = px.scatter(df_imputed, x=cluster_features[0], y=cluster_features[1], 
-                                         color='Cluster', title=f"K-Means Results (K={k_val})", template="plotly_white")
-                    st.plotly_chart(fig_clust, use_container_width=True)
+        cluster_features = st.multiselect("Select Features for Clustering:", numeric_cols, default=numeric_cols[:2])
+        k_val = st.slider("Number of Clusters (K):", 2, 10, 3)
+        if st.button("🧬 Run K-Means"):
+            X_clust = StandardScaler().fit_transform(df_imputed[cluster_features])
+            kmeans = KMeans(n_clusters=k_val, random_state=42, n_init=10)
+            df_imputed['Cluster'] = kmeans.fit_predict(X_clust)
+            fig_clust = px.scatter(df_imputed, x=cluster_features[0], y=cluster_features[1], color='Cluster', template="plotly_white")
+            st.plotly_chart(fig_clust, use_container_width=True)
 
     # --- 4. EXPORT ---
     st.divider()
     st.header("4. Export Results")
-    st.download_button("📥 Download Cleaned & Processed Dataset", data=convert_df(df_imputed), file_name="ai_processed_data_promax.csv")
+    st.download_button("📥 Download Cleaned & Processed Dataset", data=convert_df(df_imputed), file_name="ai_processed_data_2026.csv")
 
 st.markdown("---")
 st.markdown("<div style='text-align: center; color: grey;'>© Timothy Bal-e 2026 | Smart Data Warehouse</div>", unsafe_allow_html=True)
