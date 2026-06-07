@@ -96,10 +96,9 @@ if uploaded_file:
                 try:
                     # SAFETY CHECK: Downsample for heavy algorithms to prevent 502
                     working_df = df.copy()
-                    was_sampled = False
                     if (algo in ["KNN", "SVM"]) and len(working_df) > 5000:
                         working_df = working_df.sample(5000, random_state=42)
-                        was_sampled = True
+                        st.warning("⚠️ High-complexity algorithm detected. Using a 5,000 row sample to prevent server crash (502).")
 
                     X, y = working_df[features], working_df[target]
                     class_names = None
@@ -124,8 +123,7 @@ if uploaded_file:
                     model.fit(X_tr_s, y_train)
                     st.session_state.ml_results = {
                         'model': model, 'target': target, 'features': features, 'task': task,
-                        'algo': algo, 'class_names': class_names, 'y_test': y_test, 
-                        'preds': model.predict(X_te_s), 'was_sampled': was_sampled
+                        'algo': algo, 'class_names': class_names, 'y_test': y_test, 'preds': model.predict(X_te_s)
                     }
                 except Exception as e: st.error(f"⚠️ Error: {str(e)}")
 
@@ -135,11 +133,6 @@ if uploaded_file:
                 model = res['model']
                 
                 st.write(f"### 🎯 Results for {res['target']}")
-                
-                # --- NEW: SAMPLING NOTE ---
-                if res.get('was_sampled'):
-                    st.warning("📝 **Note:** Due to high computational complexity of this algorithm, the training data was reduced to a **5,000 row sample** to ensure stability and speed.")
-
                 if "Classification" in res['task']:
                     acc = accuracy_score(res['y_test'], res['preds'].astype(int))
                     st.metric("Model Accuracy", f"{acc:.2%}")
@@ -169,7 +162,7 @@ if uploaded_file:
                     fig_imp = px.bar(imp_df, x='Value', y='Feature', orientation='h', color='Value', color_continuous_scale='Portland', theme="streamlit")
                     st.plotly_chart(fig_imp, use_container_width=True)
                 else:
-                    st.info(f"💡 {res['algo']} uses high-dimensional geometry rather than simple weights to find patterns.")
+                    st.info(f"💡 {res['algo']} does not use simple weights for influence, but it uses high-dimensional geometry to find patterns.")
             else:
                 st.info("Select your clues and click 'Start Model Training'.")
 
