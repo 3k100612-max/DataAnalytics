@@ -144,19 +144,52 @@ if uploaded_file:
                 st.pyplot(fig)
 
     # --- PATH B: MACHINE LEARNING WORKSHOP ---
-    elif mode == "Machine Learning Workshop":
-        st.subheader("🤖 Supervised & Unsupervised Training")
-        st.info("Exploratory tools are paused to maximize RAM for training.")
-        
+        # --- PATH B: MACHINE LEARNING ---
+    elif mode == "Machine Learning Training":
+        st.subheader("🤖 Supervised Learning Workshop")
         m_col1, m_col2 = st.columns([1, 2])
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
         with m_col1:
-            target = st.selectbox("Predict Target (Y):", df.columns)
-            # CRITICAL: Only numeric features for math stability
-            features = st.multiselect("Predictor Features (Numeric X only):", [c for c in num_cols if c != target])
-            task = st.radio("Goal:", ["Classification (Groups)", "Regression (Numbers)"])
-            algo = st.selectbox("Algorithm:", ["Linear/Logistic Regression", "Decision Tree (CART)", "Naive Bayes", "KNN", "SVM"])
+            st.write("### ⚙️ Model Configuration")
+            
+            # 1. DYNAMIC TARGET SELECTION
+            target = st.selectbox("1. What do you want to predict? (Target Y)", df.columns)
+            
+            # 2. DYNAMIC PREDICTOR FILTERING
+            # We automatically remove the Target from the list of available clues
+            available_predictors = [col for col in num_cols if col != target]
+            
+            # 3. SMART RANKING (Optional but highly recommended)
+            if st.checkbox("Rank Predictors by Relevance?", value=True):
+                # This calculates which columns have the strongest math relationship to your target
+                correlations = df[num_cols].corr()[target].abs().sort_values(ascending=False)
+                correlations = correlations.drop(labels=[target], errors='ignore')
+                available_predictors = correlations.index.tolist()
+                if available_predictors:
+                    st.caption(f"💡 Best clue found: **{available_predictors[0]}**")
+
+            # 4. DYNAMIC MULTISELECT
+            # This box now updates its list every time you change the Target above
+            features = st.multiselect(
+                f"2. Select Clues for {target} (Predictors X):", 
+                options=available_predictors,
+                help="The list excludes your Target automatically to prevent cheating."
+            )
+            
+            task = st.radio("3. Task Type:", ["Classification (Group)", "Regression (Value)"])
+            algo = st.selectbox("4. Algorithm:", ["Linear/Logistic Regression", "Decision Tree (CART)", "Naive Bayes", "KNN", "SVM"])
+            
+            # Dynamic Depth Selection (Only for Trees)
+            depth = 5
+            if "Decision Tree" in algo:
+                depth = st.number_input("Select Max Tree Depth (Zoom Level):", 1, 100, 5)
+            
+            run_train = st.button("🚀 Start Training")
+
+        with m_col2:
+            # ... (The rest of the training and visualization code stays here) ...
+
             
             # --- STEP 7: CONDITIONAL DEPTH ---
             depth = 5
