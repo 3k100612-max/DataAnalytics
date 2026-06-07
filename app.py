@@ -4,10 +4,15 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.express as px
-import time
-import requests
-import psutil  # New import to monitor VPS RAM
 import os
+import time
+
+# --- SAFE IMPORT FOR PSUTIL ---
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 # ML Imports
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -19,11 +24,12 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.svm import SVC, SVR
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.naive_bayes import GaussianNB
+from sklearn.cluster import KMeans
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, classification_report
 
-# --- NEW: MEMORY OPTIMIZATION FUNCTION ---
+# --- MEMORY OPTIMIZATION ---
 def optimize_memory(df):
-    """ Downcast data types to save RAM for 2GB VPS limits """
+    """ Downcast types to save RAM on 2GB VPS """
     for col in df.columns:
         if df[col].dtype == 'float64':
             df[col] = df[col].astype('float32')
@@ -32,131 +38,156 @@ def optimize_memory(df):
     return df
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="DataScience Lite", layout="wide", page_icon="⚡")
-st.title("🌐 Data Warehouse (VPS Optimized)")
+st.set_page_config(page_title="DataScience Pro VPS", layout="wide", page_icon="🤖")
+st.title("🌐 Data Warehouse & ML Prototype (VPS Optimized)")
 
-# --- SIDEBAR: SYSTEM MONITOR ---
+# --- SIDEBAR: RESOURCE MONITOR ---
 st.sidebar.header("🖥️ VPS Status")
-process = psutil.Process(os.getpid())
-mem_usage = process.memory_info().rss / (1024 * 1024)  # Convert to MB
-st.sidebar.progress(min(mem_usage / 2048, 1.0)) # 2048MB limit
-st.sidebar.caption(f"RAM Usage: {mem_usage:.2f} MB / 2048 MB")
+if PSUTIL_AVAILABLE:
+    process = psutil.Process(os.getpid())
+    mem_usage = process.memory_info().rss / (1024 * 1024)
+    st.sidebar.progress(min(mem_usage / 2048, 1.0))
+    st.sidebar.caption(f"RAM Usage: {mem_usage:.1f} MB / 2048 MB")
+else:
+    st.sidebar.warning("Run 'pip install psutil' to see RAM usage.")
 
 st.sidebar.markdown("---")
 st.sidebar.header("📥 Data Source")
-source_type = st.sidebar.radio("Select Source:", ["Upload CSV", "Website URL"])
+row_limit = st.sidebar.number_input("Memory Safety: Max Rows", 1000, 100000, 50000, help="2GB VPS limit: 50k-70k rows recommended.")
 
-# --- NEW: ROW LIMITER FOR 2GB RAM ---
-st.sidebar.subheader("⚙️ Memory Safety")
-row_limit = st.sidebar.number_input("Max Rows to Load:", min_value=1000, max_value=100000, value=50000, step=5000, help="For a 2GB VPS, keep this under 100k.")
-
+uploaded_file = st.file_uploader("Upload CSV", type="csv")
 df = None
 
-# --- DATA LOADING ---
-if source_type == "Upload CSV":
-    uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
-    if uploaded_file:
-        try:
-            # Load only the specified number of rows to prevent crashing
-            df = pd.read_csv(uploaded_file, nrows=row_limit)
-            df = optimize_memory(df)
-            st.success(f"Loaded {len(df)} rows. Memory optimized.")
-        except Exception as e:
-            st.error(f"Memory Error: {e}")
-else:
-    url = st.text_input("Paste URL (Raw CSV):")
-    if url:
-        try:
-            df = pd.read_csv(url, nrows=row_limit)
-            df = optimize_memory(df)
-            st.success("Data Extracted & Optimized!")
-        except Exception as e: 
-            st.error(f"Error: {e}")
+if uploaded_file:
+    try:
+        df = pd.read_csv(uploaded_file, nrows=row_limit)
+        df = optimize_memory(df)
+        st.success(f"Data Loaded: {len(df)} rows.")
+    except Exception as e:
+        st.error(f"Error: {e}")
 
 if df is not None:
-    # --- 1. DATA PREP ---
-    st.header("1. Data Health")
+    # --- 1. DATA HEALTH & PREP ---
+    st.header("1. Data Health & Preprocessing")
+    
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     all_cols = df.columns.tolist()
     
-    # Quick Imputation (inplace to save RAM)
+    # Fast Imputation (In-place to save RAM)
+    df_imputed = df.copy()
     for col in all_cols:
         if col in numeric_cols:
-            df[col] = df[col].fillna(df[col].mean())
+            df_imputed[col] = df_imputed[col].fillna(df_imputed[col].mean())
         else:
-            df[col] = df[col].fillna("Unknown")
+            df_imputed[col] = df_imputed[col].fillna("Unknown")
 
-    st.write("### 💎 Processed Data Preview", df.head())
+    col_m1, col_m2 = st.columns(2)
+    col_m1.metric("Rows Loaded", len(df_imputed))
+    col_m2.metric("Numeric Features", len(numeric_cols))
+    st.write("### 💎 Data Preview", df_imputed.head())
 
-    # --- 2. MACHINE LEARNING WORKSHOP ---
+    # --- 2. PATTERN DISCOVERY ---
+    st.header("2. Pattern Discovery")
+    tab_corr, tab_pca = st.tabs(["📊 Correlation", "🗺️ Similarity Map (PCA)"])
+    
+    with tab_corr:
+        if len(numeric_cols) > 1:
+            fig_corr, ax_corr = plt.subplots(figsize=(8, 4))
+            sns.heatmap(df_imputed[numeric_cols].corr(), annot=True, cmap="mako", ax=ax_corr)
+            st.pyplot(fig_corr)
+        else:
+            st.info("Need more numeric columns for Correlation.")
+
+    with tab_pca:
+        if len(numeric_cols) >= 2:
+            pca_scaled = StandardScaler().fit_transform(df_imputed[numeric_cols])
+            pca_res = PCA(n_components=2).fit_transform(pca_scaled)
+            pca_df = pd.DataFrame(pca_res, columns=['PC1', 'PC2'])
+            fig_pca = px.scatter(pca_df, x='PC1', y='PC2', template="plotly_dark")
+            st.plotly_chart(fig_pca, use_container_width=True)
+
+    # --- 3. MACHINE LEARNING WORKSHOP ---
     st.divider()
     st.header("3. 🤖 Machine Learning Workshop")
     
-    col_set, col_res = st.columns([1, 2])
-    
-    with col_set:
-        target = st.selectbox("Target Variable (Y):", all_cols)
-        features = st.multiselect("Features (X):", [c for c in numeric_cols if c != target], default=[c for c in numeric_cols if c != target][:2])
-        task = st.radio("Task:", ["Classification", "Regression"])
-        algo = st.selectbox("Algorithm:", ["Linear Regression", "Decision Tree", "KNN", "Naive Bayes", "SVM"])
+    ml_type = st.selectbox("Select Learning Type:", ["Supervised (Prediction)", "Unsupervised (Clustering)"])
+
+    if ml_type == "Supervised (Prediction)":
+        col_set, col_res = st.columns([1, 2])
         
-        # Hyperparameter for Trees
-        max_depth_val = 3
-        if algo == "Decision Tree":
-            max_depth_val = st.slider("Max Tree Depth:", 1, 10, 3)
-
-        train_btn = st.button("🚀 Train Model")
-
-    with col_res:
-        if train_btn:
-            if not features:
-                st.error("Select features first.")
+        with col_set:
+            target = st.selectbox("Target Variable (Y):", all_cols)
+            features = st.multiselect("Features (X):", [c for c in numeric_cols if c != target])
+            
+            # --- TASK FILTERING ---
+            task = st.radio("Goal:", ["Classification (Groups)", "Regression (Numbers)"])
+            
+            if task == "Classification (Groups)":
+                algo = st.selectbox("Algorithm:", ["Random Forest", "Decision Tree", "Logistic Regression", "SVM", "KNN", "Naive Bayes"])
             else:
-                with st.spinner('Training...'):
-                    X = df[features]
-                    y = df[target]
+                algo = st.selectbox("Algorithm:", ["Random Forest", "Decision Tree", "Linear Regression", "SVM", "KNN"])
+            
+            # --- HYPERPARAMETER: MAX DEPTH ---
+            max_depth_val = None
+            if "Tree" in algo or "Forest" in algo:
+                max_depth_val = st.slider("Max Tree Depth:", 1, 20, 3)
+            
+            train_btn = st.button("🚀 Train & Predict")
+
+        with col_res:
+            if train_btn and features:
+                with st.spinner(f"Training {algo}..."):
+                    X = df_imputed[features]
+                    y = df_imputed[target]
                     
-                    if task == "Classification":
+                    if task == "Classification (Groups)":
                         le = LabelEncoder()
                         y = le.fit_transform(y.astype(str))
                     
                     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
                     
-                    # Scaling (Crucial for KNN/SVM)
+                    # Scaling
                     sc = StandardScaler()
                     X_train = sc.fit_transform(X_train)
                     X_test = sc.transform(X_test)
 
-                    # Model selection
-                    if algo == "Linear Regression": model = LinearRegression()
+                    # Model Selection
+                    if algo == "Random Forest":
+                        model = RandomForestClassifier(max_depth=max_depth_val) if task == "Classification (Groups)" else RandomForestRegressor(max_depth=max_depth_val)
                     elif algo == "Decision Tree":
-                        model = DecisionTreeClassifier(max_depth=max_depth_val) if task == "Classification" else DecisionTreeRegressor(max_depth=max_depth_val)
-                    elif algo == "SVM":
-                        model = SVC() if task == "Classification" else SVR()
-                    elif algo == "KNN":
-                        model = KNeighborsClassifier() if task == "Classification" else KNeighborsRegressor()
-                    elif algo == "Naive Bayes":
-                        model = GaussianNB()
+                        model = DecisionTreeClassifier(max_depth=max_depth_val) if task == "Classification (Groups)" else DecisionTreeRegressor(max_depth=max_depth_val)
+                    elif algo == "Linear Regression": model = LinearRegression()
+                    elif algo == "Logistic Regression": model = LogisticRegression()
+                    elif algo == "SVM": model = SVC() if task == "Classification (Groups)" else SVR()
+                    elif algo == "KNN": model = KNeighborsClassifier() if task == "Classification (Groups)" else KNeighborsRegressor()
+                    elif algo == "Naive Bayes": model = GaussianNB()
 
                     model.fit(X_train, y_train)
                     preds = model.predict(X_test)
 
-                    st.success(f"{algo} Complete!")
-                    if task == "Regression":
+                    st.success(f"{algo} Trained!")
+                    if task == "Regression (Numbers)":
                         st.metric("R² Score", f"{r2_score(y_test, preds):.4f}")
                     else:
                         st.metric("Accuracy", f"{accuracy_score(y_test, preds):.2%}")
+                        st.code(classification_report(y_test, preds))
 
-                    # --- EDUCATIONAL BREAKDOWN ---
+                    # --- EDUCATIONAL SECTION ---
                     with st.expander("🧮 How was this computed?"):
-                        if algo == "Linear Regression":
+                        if "Tree" in algo:
+                            st.latex(r"\text{Gini} = 1 - \sum (P_i)^2")
+                            st.write(f"The model split data into branches up to depth **{max_depth_val}**.")
+                        elif algo == "Linear Regression":
                             st.latex(r"Y = \beta_0 + \beta_1X_1 + \epsilon")
-                            st.write("Calculates a 'Line of Best Fit' to predict continuous numbers.")
                         elif algo == "KNN":
                             st.latex(r"d = \sqrt{\sum(x_i - y_i)^2}")
-                            st.write("Finds the closest neighbors in the data to make a prediction.")
-                        elif algo == "Decision Tree":
-                            st.write(f"Flowchart logic with depth {max_depth_val}. Splits data based on feature importance.")
 
-    st.sidebar.markdown("---")
-    st.sidebar.caption("© Timothy Bal-e 2026")
+    elif ml_type == "Unsupervised (Clustering)":
+        c_features = st.multiselect("Clustering Features:", numeric_cols)
+        k = st.slider("K (Clusters):", 2, 10, 3)
+        if st.button("🧬 Run K-Means") and c_features:
+            X_c = StandardScaler().fit_transform(df_imputed[c_features])
+            df_imputed['Cluster'] = KMeans(n_clusters=k, n_init=10).fit_predict(X_c)
+            st.plotly_chart(px.scatter(df_imputed, x=c_features[0], y=c_features[1], color='Cluster'))
+
+st.sidebar.caption("© Timothy Bal-e 2026")
