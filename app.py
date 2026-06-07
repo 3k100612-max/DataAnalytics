@@ -112,23 +112,28 @@ if uploaded_file:
                 st.pyplot(fig)
 
     # --- PATH B: MACHINE LEARNING WORKSHOP ---
+        # --- PATH B: MACHINE LEARNING WORKSHOP ---
     elif mode == "Machine Learning Workshop":
         st.subheader("🤖 Supervised Learning Workshop")
         m_col1, m_col2 = st.columns([1, 2])
+        
+        # Define numeric columns for math operations
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
         with m_col1:
             st.write("### ⚙️ Model Configuration")
+            
+            # 1. Target Selection
             target = st.selectbox("1. What do you want to predict? (Target Y)", df.columns)
             
-            # Dynamic Predictor Filtering
+            # 2. Base Predictor List (All numeric columns except the target)
             available_predictors = [col for col in num_cols if col != target]
+            
+            # 3. SMART RANKING (Fixed Indentation)
             if st.checkbox("Rank Predictors by Relevance?", value=True):
-                   # 3. SMART RANKING (FIXED VERSION)
-            if st.checkbox("Rank Predictors by Relevance?", value=True):
-                # We check if the target is a number. Correlation only works on numbers.
                 if target in num_cols:
                     try:
+                        # Calculate correlation and sort
                         correlations = df[num_cols].corr()[target].abs().sort_values(ascending=False)
                         correlations = correlations.drop(labels=[target], errors='ignore')
                         available_predictors = correlations.index.tolist()
@@ -137,11 +142,12 @@ if uploaded_file:
                     except Exception:
                         available_predictors = [col for col in num_cols if col != target]
                 else:
-                    # If target is text (like Major_Category), we show this message instead of crashing
-                    st.info("💡 Ranking is optimized for numeric targets. Showing all available clues.")
+                    st.info("💡 Ranking is optimized for numeric targets.")
                     available_predictors = [col for col in num_cols if col != target]
 
+            # 4. Predictor Selection
             features = st.multiselect(f"2. Select Clues for {target} (Predictors X):", options=available_predictors)
+            
             task = st.radio("3. Task Type:", ["Classification (Group)", "Regression (Value)"])
             algo = st.selectbox("4. Algorithm:", ["Linear/Logistic Regression", "Decision Tree (CART)", "Naive Bayes", "KNN", "SVM"])
             
@@ -178,7 +184,7 @@ if uploaded_file:
                     model.fit(X_tr_s, y_train)
                     preds = model.predict(X_te_s)
 
-                    # --- 3. PERFORMANCE VISUALS (Proper Labeling) ---
+                    # --- 3. PERFORMANCE VISUALS ---
                     st.write(f"### 🎯 Results for {target}")
                     if "Classification" in task:
                         cm = confusion_matrix(y_test, preds.astype(int))
@@ -187,16 +193,9 @@ if uploaded_file:
                         ax.set_title(f"Accuracy: {accuracy_score(y_test, preds):.2%}")
                         ax.set_xlabel(f"Predicted {target}"); ax.set_ylabel(f"Actual {target}")
                         st.pyplot(fig)
-                        
-                        if "Decision Tree" in algo:
-                            st.write("#### Logic Visualization")
-                            fig_tree, ax_tree = plt.subplots(figsize=(12, 6))
-                            plot_tree(model, feature_names=features, class_names=class_names, filled=True, max_depth=3, ax=ax_tree)
-                            st.pyplot(fig_tree)
                     else:
                         fig_reg = px.scatter(x=y_test, y=preds, labels={'x': f'Actual {target}', 'y': f'Predicted {target}'}, 
-                                             title=f"Regression Accuracy (R²: {r2_score(y_test, preds):.4f})", template="plotly_dark")
-                        fig_reg.add_shape(type="line", x0=y_test.min(), y0=y_test.min(), x1=y_test.max(), y1=y_test.max(), line=dict(color="Red", dash="dash"))
+                                             title=f"Regression Accuracy", template="plotly_dark")
                         st.plotly_chart(fig_reg, use_container_width=True)
 
                     # --- 4. PREDICTOR INFLUENCE ---
@@ -214,6 +213,7 @@ if uploaded_file:
 
                 except Exception as e:
                     st.error(f"⚠️ Training Error: {str(e)}")
+
 
 # Footer
 st.markdown("---")
