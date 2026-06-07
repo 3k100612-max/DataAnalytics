@@ -12,6 +12,7 @@ import streamlit.components.v1 as components
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor, plot_tree
 from sklearn.naive_bayes import GaussianNB
@@ -19,7 +20,7 @@ from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.svm import SVC, SVR
 from sklearn.metrics import r2_score, accuracy_score, confusion_matrix
 
-# --- 1. SYSTEM MONITORING ---
+# --- 1. SYSTEM & RAM MONITORING ---
 def get_vps_ram():
     try:
         return psutil.Process(os.getpid()).memory_info().rss / (1024**2)
@@ -40,23 +41,28 @@ browser_ram_js = """
 </script>
 """
 
-# --- 2. DATA ENGINE (Step 2: Cleaning) ---
+# --- 2. DATA ENGINE (Step 2: Automated Cleaning) ---
 @st.cache_data
 def load_and_fix(file, rows):
     df = pd.read_csv(file, nrows=rows, low_memory=False)
     total_missing = df.isnull().sum().sum()
+    
+    # RAM Optimization: Downcast numbers
     for col in df.columns:
         if df[col].dtype == 'float64': df[col] = df[col].astype('float32')
         if df[col].dtype == 'int64': df[col] = df[col].astype('int32')
+    
+    # Fix Missing Values (Imputation)
     df = df.fillna(df.median(numeric_only=True))
     for col in df.select_dtypes(exclude=[np.number]).columns:
         df[col] = df[col].fillna(df[col].mode()[0] if not df[col].mode().empty else "Unknown")
+        
     return df, total_missing
 
-# --- 3. UI SETUP ---
+# --- 3. UI CONFIGURATION ---
 st.set_page_config(page_title="GPAI Data Pro", layout="wide", page_icon="🧪")
 st.title("🧪 Advanced ML Workshop & Data Warehouse")
-st.caption("Refined Dataset Labeling | Optimized for 8GB VPS | @timothymarkbale2026")
+st.caption(f"Server Date: 2026-06-06 | Sequential RAM Management | @timothymarkbale2026")
 
 with st.sidebar:
     st.header("🖥️ System Status")
@@ -66,126 +72,169 @@ with st.sidebar:
     components.html(browser_ram_js, height=50)
     st.markdown("---")
     row_limit = st.sidebar.slider("Max Rows to Load", 1000, 1000000, 500000)
+    st.sidebar.info("Switching to 'Training' mode automatically unloads PCA to save RAM.")
 
-# --- STEP 1: UPLOAD ---
+# --- STEP 1: DATA UPLOAD ---
 uploaded_file = st.file_uploader("1. Upload CSV Dataset", type="csv")
 
 if uploaded_file:
-    # --- STEP 2: FIX ---
+    # --- STEP 2: CHECK & FIX ---
     df, total_missing = load_and_fix(uploaded_file, row_limit)
-    st.success(f"✅ Data Health Check: {total_missing} missing values fixed.")
+    st.success(f"✅ Data Health Check: {total_missing} missing values fixed automatically.")
     
-    # --- STEP 3: DOWNLOAD ---
+    # --- STEP 3: DOWNLOAD FIXED DATA ---
     csv_data = df.to_csv(index=False).encode('utf-8')
-    st.download_button(label="📥 Download Fixed Dataset", data=csv_data, file_name="fixed_data.csv", mime="text/csv")
+    st.download_button(
+        label="📥 Download Fixed Dataset (CSV)",
+        data=csv_data,
+        file_name="cleaned_dataset_pro.csv",
+        mime="text/csv",
+        help="Download the version with median-filled numeric values and mode-filled categories."
+    )
 
     st.divider()
 
-    # --- STEP 4 & 5: MODE SELECTION ---
-    st.header("🧠 2. Choose Analysis Mode")
-    mode = st.radio("Select Action:", ["None", "Exploratory Analysis (PCA & Heatmap)", "Machine Learning Training"], horizontal=True)
+    # --- STEP 4 & 5: SEQUENTIAL ANALYSIS (RAM PROTECTION) ---
+    st.header("🧠 2. Analysis & Training Environment")
+    mode = st.radio("Select Active Workspace:", 
+                    ["None", "Exploratory Analysis (PCA & Heatmap)", "Machine Learning Workshop"], 
+                    horizontal=True)
 
+    # --- PATH A: EXPLORATORY ANALYSIS ---
     if mode == "Exploratory Analysis (PCA & Heatmap)":
-        st.subheader("💎 Dimensionality & Correlation Analysis")
+        st.subheader("💎 Dimensionality & Correlation")
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        c1, c2 = st.columns(2)
         
-        with c1:
-            st.write("### PCA Projection Map")
-            pca_feats = st.multiselect("Select Numeric Features:", num_cols, default=num_cols[:min(3, len(num_cols))])
-            target_color = st.selectbox("Color Map by:", df.columns)
-            if st.button("Generate PCA") and len(pca_feats) >= 2:
+        col_a, col_b = st.columns(2)
+        
+        with col_a:
+            st.write("### PCA Projection")
+            with st.expander("📖 The Math of PCA (For Non-Technical Users)"):
+                st.write("PCA reduces many columns into just 2 while keeping the 'spread' of your data.")
+                st.latex(r"Z = X \cdot W")
+                st.info("💡 Analogy: Imagine taking a photo of a 3D object. PCA finds the best angle to take that photo.")
+            
+            pca_feats = st.multiselect("Select Numeric Features for PCA:", num_cols, default=num_cols[:min(3, len(num_cols))])
+            target_color = st.selectbox("Color Map by (Label):", df.columns)
+            
+            if st.button("Generate PCA Map") and len(pca_feats) >= 2:
                 X_pca = StandardScaler().fit_transform(df[pca_feats])
                 pca = PCA(n_components=2)
                 comps = pca.fit_transform(X_pca)
                 pdf = pd.DataFrame(comps, columns=['Principal Component 1', 'Principal Component 2'])
                 pdf[target_color] = df[target_color].values
-                # Dynamic Title and Labels
-                fig_pca = px.scatter(pdf, x='Principal Component 1', y='Principal Component 2', color=target_color, 
-                                     template="plotly_dark", title=f"PCA Analysis: {target_color} Distribution")
+                
+                fig_pca = px.scatter(pdf, x='Principal Component 1', y='Principal Component 2', 
+                                     color=target_color, template="plotly_dark", 
+                                     title=f"PCA Projection: Insights on {target_color}")
                 st.plotly_chart(fig_pca, use_container_width=True)
 
-        with c2:
-            st.write("### Correlation Heatmap")
-            if st.button("Generate Heatmap"):
+        with col_b:
+            st.write("### Numerical Relationship Map")
+            with st.expander("📖 The Math of Correlation"):
+                st.write("Measures how much two variables move together.")
+                st.latex(r"r = \frac{\sum (x_i - \bar{x})(y_i - \bar{y})}{\sqrt{\sum (x_i - \bar{x})^2 \sum (y_i - \bar{y})^2}}")
+            
+            if st.button("Generate Relationship Heatmap"):
                 fig, ax = plt.subplots(figsize=(10, 8))
-                sns.heatmap(df[num_cols].corr(), annot=False, cmap="coolwarm", ax=ax, cbar_kws={'label': 'Correlation Strength'})
-                ax.set_title("Feature Relationship Map")
+                # PROPER LABELING: annot=True shows the relationship numbers
+                sns.heatmap(df[num_cols].corr(), annot=True, fmt=".2f", cmap="coolwarm", ax=ax, 
+                            cbar_kws={'label': 'Correlation Strength (-1 to 1)'})
+                ax.set_title("How Numeric Features Influence Each Other")
                 st.pyplot(fig)
 
-    # --- PATH B: MACHINE LEARNING (STEP 6 & 7) ---
-    elif mode == "Machine Learning Training":
-        st.subheader("🤖 Supervised Learning Workshop")
-        st.info("Exploratory visuals stopped to save RAM for model training.")
+    # --- PATH B: MACHINE LEARNING WORKSHOP ---
+    elif mode == "Machine Learning Workshop":
+        st.subheader("🤖 Supervised & Unsupervised Training")
+        st.info("Exploratory tools are paused to maximize RAM for training.")
         
         m_col1, m_col2 = st.columns([1, 2])
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
         with m_col1:
             target = st.selectbox("Predict Target (Y):", df.columns)
-            # CRITICAL: Numeric features only for stability
+            # CRITICAL: Only numeric features for math stability
             features = st.multiselect("Predictor Features (Numeric X only):", [c for c in num_cols if c != target])
-            task = st.radio("Task Type:", ["Classification", "Regression"])
+            task = st.radio("Goal:", ["Classification (Groups)", "Regression (Numbers)"])
             algo = st.selectbox("Algorithm:", ["Linear/Logistic Regression", "Decision Tree (CART)", "Naive Bayes", "KNN", "SVM"])
             
+            # --- STEP 7: CONDITIONAL DEPTH ---
             depth = 5
             if "Decision Tree" in algo:
-                depth = st.number_input("Select Max Tree Depth:", 1, 100, 5)
+                st.markdown("---")
+                depth = st.number_input("Select Max Tree Depth:", 1, 100, 5, help="Controls how deep the logic goes.")
             
-            run_train = st.button("🚀 Start Training")
+            run_train = st.button("🚀 Start Model Training")
 
         with m_col2:
             if run_train and features:
                 try:
-                    # --- MATH & SCALING ---
-                    with st.expander("📖 Computation Guide", expanded=True):
-                        st.write("**Standard Scaling Active:** Normalizing data for math stability.")
+                    # --- MATH EXPLAINERS ---
+                    with st.expander("📖 Computation & Scaling Guide", expanded=True):
+                        st.write("**Scaling Active:** Data transformed for math stability.")
                         st.latex(r"z = \frac{x - \mu}{\sigma}")
+                        if "Regression" in algo and task == "Regression (Numbers)":
+                            st.write("**Logic:** Finding the best line fit using Ordinary Least Squares.")
+                        elif "Decision Tree" in algo:
+                            st.write("**Logic:** Splitting data based on Gini Impurity (Purity).")
+                            st.latex(r"Gini = 1 - \sum (P_i)^2")
 
-                    # --- PREP & TRAIN ---
+                    # --- PREP DATA ---
                     X, y = df[features], df[target]
-                    if task == "Classification":
+                    if "Classification" in task:
                         le = LabelEncoder()
                         y = le.fit_transform(y.astype(str))
                         class_names = [str(c) for c in le.classes_]
                     
                     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
                     
-                    # Apply Scaler to prevent "Connect Error"
+                    # Apply Scaler (Mandatory for Regression stability)
                     scaler = StandardScaler()
                     X_tr_s = scaler.fit_transform(X_train)
                     X_te_s = scaler.transform(X_test)
 
+                    # Model Selection
                     if algo == "Linear/Logistic Regression":
-                        model = LogisticRegression(max_iter=1000) if task == "Classification" else LinearRegression()
+                        model = LogisticRegression(max_iter=1000) if "Classification" in task else LinearRegression()
                     elif algo == "Decision Tree (CART)":
-                        model = DecisionTreeClassifier(max_depth=depth) if task == "Classification" else DecisionTreeRegressor(max_depth=depth)
+                        model = DecisionTreeClassifier(max_depth=depth) if "Classification" in task else DecisionTreeRegressor(max_depth=depth)
                     elif algo == "Naive Bayes": model = GaussianNB()
-                    elif algo == "KNN": model = KNeighborsClassifier() if task == "Classification" else KNeighborsRegressor()
-                    elif algo == "SVM": model = SVC() if task == "Classification" else SVR()
+                    elif algo == "KNN": model = KNeighborsClassifier() if "Classification" in task else KNeighborsRegressor()
+                    elif algo == "SVM": model = SVC() if "Classification" in task else SVR()
 
                     model.fit(X_tr_s, y_train)
                     preds = model.predict(X_te_s)
 
-                    # --- DYNAMIC VISUALS WITH DATASET LABELS ---
-                    if task == "Classification":
-                        st.write(f"#### Result: Predicting {target}")
+                    # --- STEP 6: DYNAMIC DATASET LABELING ---
+                    if "Classification" in task:
+                        st.write(f"#### Performance: Predicting {target}")
                         cm = confusion_matrix(y_test, preds.astype(int))
                         fig, ax = plt.subplots()
                         sns.heatmap(cm, annot=True, fmt='d', cmap="Purples", xticklabels=class_names, yticklabels=class_names)
-                        ax.set_title(f"Accuracy: {accuracy_score(y_test, preds):.2%}")
-                        ax.set_xlabel(f"Predicted {target}"); ax.set_ylabel(f"Actual {target}")
+                        ax.set_title(f"Model Accuracy: {accuracy_score(y_test, preds):.2%}")
+                        ax.set_xlabel(f"Predicted {target} Category")
+                        ax.set_ylabel(f"Actual {target} in Dataset")
                         st.pyplot(fig)
+                        
+                        if "Decision Tree" in algo:
+                            st.write("#### Logic Visualization (Top Branches)")
+                            fig_tree, ax_tree = plt.subplots(figsize=(12, 6))
+                            plot_tree(model, feature_names=features, class_names=class_names, filled=True, max_depth=3, ax=ax_tree)
+                            st.pyplot(fig_tree)
                     else:
                         st.write(f"#### Precision Map: Predicting {target}")
-                        fig_reg = px.scatter(x=y_test, y=preds, labels={'x': f'Actual {target}', 'y': f'Predicted {target}'}, 
-                                             title=f"Regression: Actual vs Predicted {target}", template="plotly_dark")
-                        fig_reg.add_shape(type="line", x0=y_test.min(), y0=y_test.min(), x1=y_test.max(), y1=y_test.max(), line=dict(color="Red", dash="dash"))
+                        fig_reg = px.scatter(x=y_test, y=preds, 
+                                             labels={'x': f'Actual {target}', 'y': f'Predicted {target}'}, 
+                                             title=f"Regression Accuracy (R² Score: {r2_score(y_test, preds):.4f})", 
+                                             template="plotly_dark")
+                        fig_reg.add_shape(type="line", x0=y_test.min(), y0=y_test.min(), x1=y_test.max(), y1=y_test.max(), 
+                                          line=dict(color="Red", dash="dash"))
                         st.plotly_chart(fig_reg, use_container_width=True)
 
                 except Exception as e:
-                    st.error(f"⚠️ Calculation Error: {str(e)}")
+                    st.error(f"⚠️ Training Error: {str(e)}")
+                    st.info("Check if your Target matches the Task Type (Classification vs Regression).")
 
 # Footer
 st.markdown("---")
-st.markdown("<p style='text-align: center; color: grey;'>© timothymarkbale2026 | Enhanced Dataset Labeling Active</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: grey;'>© timothymarkbale2026 | Refined Sequential Workflow</p>", unsafe_allow_html=True)
