@@ -124,11 +124,22 @@ if uploaded_file:
             # Dynamic Predictor Filtering
             available_predictors = [col for col in num_cols if col != target]
             if st.checkbox("Rank Predictors by Relevance?", value=True):
-                correlations = df[num_cols].corr()[target].abs().sort_values(ascending=False)
-                correlations = correlations.drop(labels=[target], errors='ignore')
-                available_predictors = correlations.index.tolist()
-                if available_predictors:
-                    st.caption(f"💡 Best clue found: **{available_predictors[0]}**")
+                   # 3. SMART RANKING (FIXED VERSION)
+            if st.checkbox("Rank Predictors by Relevance?", value=True):
+                # We check if the target is a number. Correlation only works on numbers.
+                if target in num_cols:
+                    try:
+                        correlations = df[num_cols].corr()[target].abs().sort_values(ascending=False)
+                        correlations = correlations.drop(labels=[target], errors='ignore')
+                        available_predictors = correlations.index.tolist()
+                        if available_predictors:
+                            st.caption(f"💡 Best numeric clue: **{available_predictors[0]}**")
+                    except Exception:
+                        available_predictors = [col for col in num_cols if col != target]
+                else:
+                    # If target is text (like Major_Category), we show this message instead of crashing
+                    st.info("💡 Ranking is optimized for numeric targets. Showing all available clues.")
+                    available_predictors = [col for col in num_cols if col != target]
 
             features = st.multiselect(f"2. Select Clues for {target} (Predictors X):", options=available_predictors)
             task = st.radio("3. Task Type:", ["Classification (Group)", "Regression (Value)"])
