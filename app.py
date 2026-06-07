@@ -18,6 +18,7 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.svm import SVC, SVR
 from sklearn.metrics import r2_score, accuracy_score, confusion_matrix
+from sklearn.inspection import permutation_importance  # Added for KNN/SVM influence
 
 # --- 1. SYSTEM & RAM MONITORING ---
 def get_vps_ram():
@@ -191,7 +192,8 @@ if uploaded_file:
                     model.fit(X_tr_s, y_train)
                     st.session_state.ml_results = {
                         'model': model, 'target': target, 'features': features, 'task': task,
-                        'algo': algo, 'class_names': class_names, 'y_test': y_test, 'preds': model.predict(X_te_s)
+                        'algo': algo, 'class_names': class_names, 'y_test': y_test, 
+                        'preds': model.predict(X_te_s), 'X_test_scaled': X_te_s
                     }
                 except Exception as e: st.error(f"⚠️ Error: {str(e)}")
 
@@ -218,20 +220,41 @@ if uploaded_file:
                 st.write(f"### 🧠 {res['algo']} Logic Explainer")
                 if "Decision Tree" in res['algo']:
                     fig_tree, ax_tree = plt.subplots(figsize=(12, 6))
-                    plot_tree(model, feature_names=res['features'], class_names=res['class_names'], filled=True, rounded=True, max_depth=2, ax=ax_tree)
+                    # FIXED: Removed max_depth=2 so it reflects the actual trained tree depth
+                    plot_tree(model, feature_names=res['features'], class_names=res['class_names'], filled=True, rounded=True, ax=ax_tree)
                     st.pyplot(fig_tree)
                     plt.close(fig_tree)
                 elif "Regression" in res['algo']:
                     with st.expander("🔍 How it works"):
                         st.write("Regression assigns a 'Weight' to every clue. Higher weights mean that clue is more important.")
                         st.latex(r"y = w_1x_1 + w_2x_2 + b")
+                elif "KNN" in res['algo']:
+                    with st.expander("🔍 How it works"):
+                        st.write("**K-Nearest Neighbors** finds the most similar rows (neighbors) in the training data to make a prediction.")
+                elif "Naive Bayes" in res['algo']:
+                    with st.expander("🔍 How it works"):
+                        st.write("**Naive Bayes** uses probability to guess the category based on how clues are distributed.")
+                        st.latex(r"P(A|B) = \frac{P(B|A)P(A)}{P(B)}")
+                elif "SVM" in res['algo']:
+                    with st.expander("🔍 How it works"):
+                        st.write("**Support Vector Machines** try to find the best boundary (hyperplane) that separates different groups.")
 
                 # Predictor Influence
                 st.divider()
                 st.write("### 📊 Predictor Influence")
                 importance_data = None
-                if hasattr(model, 'feature_importances_'): importance_data = model.feature_importances_
-                elif hasattr(model, 'coef_'): importance_data = np.abs(model.coef_).mean(axis=0) if len(model.coef_.shape) > 1 else np.abs(model.coef_)
+                
+                # 1. Check for Tree Importance
+                if hasattr(model, 'feature_importances_'): 
+                    importance_data = model.feature_importances_
+                # 2. Check for Linear Coefficients
+                elif hasattr(model, 'coef_'): 
+                    importance_data = np.abs(model.coef_).mean(axis=0) if len(model.coef_.shape) > 1 else np.abs(model.coef_)
+                # 3. Fallback for SVM/KNN/Naive Bayes (Permutation Importance)
+                else:
+                    with st.spinner("Calculating Influence (Permutation)..."):
+                        perm = permutation_importance(model, res['X_test_scaled'], res['y_test'], n_repeats=5, random_state=42)
+                        importance_data = perm.importances_mean
 
                 if importance_data is not None:
                     imp_df = pd.DataFrame({'Feature': res['features'], 'Value': importance_data}).sort_values(by='Value')
