@@ -139,8 +139,9 @@ if uploaded_file:
                 
                 # Logic Insight
                 strongest = corr_matrix.unstack().sort_values(ascending=False).drop_duplicates()
-                pair = strongest.index[1] # Index 0 is the variable with itself
-                st.success(f"**Insight:** Strongest relationship found between **{pair[0]}** and **{pair[1]}** ({strongest[1]:.2f}).")
+                pair = strongest.index[1] # This part is fine
+                # Change strongest[1] to strongest.iloc[1]
+                st.success(f"**Insight:** Strongest relationship found between **{pair[0]}** and **{pair[1]}** ({strongest.iloc[1]:.2f}).")
 
     # --- PATH B: MACHINE LEARNING WORKSHOP ---
     elif mode == "Machine Learning Workshop":
