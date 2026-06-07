@@ -138,10 +138,13 @@ if uploaded_file:
                 plt.close(fig)
                 
                 # Logic Insight
-                strongest = corr_matrix.unstack().sort_values(ascending=False).drop_duplicates()
-                pair = strongest.index[1] # This part is fine
-                # Change strongest[1] to strongest.iloc[1]
-                st.success(f"**Insight:** Strongest relationship found between **{pair[0]}** and **{pair[1]}** ({strongest.iloc[1]:.2f}).")
+                if len(num_cols) > 1:
+                    strongest = corr_matrix.unstack().sort_values(ascending=False).drop_duplicates()
+                    pair = strongest.index[1] 
+                    # Use .iloc[1] to get the value safely
+                    st.success(f"**Insight:** Strongest relationship found between **{pair[0]}** and **{pair[1]}** ({strongest.iloc[1]:.2f}).")
+                else:
+                    st.warning("Not enough numeric columns to find relationships.")
 
     # --- PATH B: MACHINE LEARNING WORKSHOP ---
     elif mode == "Machine Learning Workshop":
