@@ -23,7 +23,8 @@ from sklearn.metrics import r2_score, accuracy_score, confusion_matrix
 def get_vps_ram():
     try:
         return psutil.Process(os.getpid()).memory_info().rss / (1024**2)
-    except: return 0
+    except: 
+        return 0
 
 browser_ram_js = """
 <div id="browser-mem" style="font-family: sans-serif; color: #808495; font-size: 0.8rem;">Detecting Browser RAM...</div>
@@ -112,28 +113,20 @@ if uploaded_file:
                 st.pyplot(fig)
 
     # --- PATH B: MACHINE LEARNING WORKSHOP ---
-        # --- PATH B: MACHINE LEARNING WORKSHOP ---
     elif mode == "Machine Learning Workshop":
         st.subheader("🤖 Supervised Learning Workshop")
         m_col1, m_col2 = st.columns([1, 2])
-        
-        # Define numeric columns for math operations
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
         with m_col1:
             st.write("### ⚙️ Model Configuration")
             
-            # 1. Target Selection
             target = st.selectbox("1. What do you want to predict? (Target Y)", df.columns)
-            
-            # 2. Base Predictor List (All numeric columns except the target)
             available_predictors = [col for col in num_cols if col != target]
             
-            # 3. SMART RANKING (Fixed Indentation)
             if st.checkbox("Rank Predictors by Relevance?", value=True):
                 if target in num_cols:
                     try:
-                        # Calculate correlation and sort
                         correlations = df[num_cols].corr()[target].abs().sort_values(ascending=False)
                         correlations = correlations.drop(labels=[target], errors='ignore')
                         available_predictors = correlations.index.tolist()
@@ -145,9 +138,7 @@ if uploaded_file:
                     st.info("💡 Ranking is optimized for numeric targets.")
                     available_predictors = [col for col in num_cols if col != target]
 
-            # 4. Predictor Selection
             features = st.multiselect(f"2. Select Clues for {target} (Predictors X):", options=available_predictors)
-            
             task = st.radio("3. Task Type:", ["Classification (Group)", "Regression (Value)"])
             algo = st.selectbox("4. Algorithm:", ["Linear/Logistic Regression", "Decision Tree (CART)", "Naive Bayes", "KNN", "SVM"])
             
@@ -177,9 +168,12 @@ if uploaded_file:
                         model = LogisticRegression(max_iter=1000) if "Classification" in task else LinearRegression()
                     elif algo == "Decision Tree (CART)":
                         model = DecisionTreeClassifier(max_depth=depth) if "Classification" in task else DecisionTreeRegressor(max_depth=depth)
-                    elif algo == "Naive Bayes": model = GaussianNB()
-                    elif algo == "KNN": model = KNeighborsClassifier() if "Classification" in task else KNeighborsRegressor()
-                    elif algo == "SVM": model = SVC() if "Classification" in task else SVR()
+                    elif algo == "Naive Bayes": 
+                        model = GaussianNB()
+                    elif algo == "KNN": 
+                        model = KNeighborsClassifier() if "Classification" in task else KNeighborsRegressor()
+                    elif algo == "SVM": 
+                        model = SVC() if "Classification" in task else SVR()
 
                     model.fit(X_tr_s, y_train)
                     preds = model.predict(X_te_s)
@@ -191,7 +185,8 @@ if uploaded_file:
                         fig, ax = plt.subplots()
                         sns.heatmap(cm, annot=True, fmt='d', cmap="Purples", xticklabels=class_names, yticklabels=class_names)
                         ax.set_title(f"Accuracy: {accuracy_score(y_test, preds):.2%}")
-                        ax.set_xlabel(f"Predicted {target}"); ax.set_ylabel(f"Actual {target}")
+                        ax.set_xlabel(f"Predicted {target}")
+                        ax.set_ylabel(f"Actual {target}")
                         st.pyplot(fig)
                     else:
                         fig_reg = px.scatter(x=y_test, y=preds, labels={'x': f'Actual {target}', 'y': f'Predicted {target}'}, 
@@ -199,7 +194,7 @@ if uploaded_file:
                         st.plotly_chart(fig_reg, use_container_width=True)
 
                     # --- 4. PREDICTOR INFLUENCE ---
-                   st.write(f"### 📊 Predictor Influence for {target}")
+                    st.write(f"### 📊 Predictor Influence for {target}")
                     st.caption(f"This analysis shows which clues are most responsible for determining the {target}.")
 
                     importance_data = None
@@ -243,7 +238,6 @@ if uploaded_file:
 
                 except Exception as e:
                     st.error(f"⚠️ Training Error: {str(e)}")
-
 
 # Footer
 st.markdown("---")
