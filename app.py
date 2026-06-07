@@ -199,17 +199,47 @@ if uploaded_file:
                         st.plotly_chart(fig_reg, use_container_width=True)
 
                     # --- 4. PREDICTOR INFLUENCE ---
-                    st.write("### 📊 Predictor Influence Analysis")
+                   st.write(f"### 📊 Predictor Influence for {target}")
+                    st.caption(f"This analysis shows which clues are most responsible for determining the {target}.")
+
                     importance_data = None
                     if hasattr(model, 'feature_importances_'):
                         importance_data = model.feature_importances_
+                        label_type = "Importance Score"
                     elif hasattr(model, 'coef_'):
                         importance_data = np.abs(model.coef_).mean(axis=0) if len(model.coef_.shape) > 1 else np.abs(model.coef_)
+                        label_type = "Impact Weight (Absolute)"
 
                     if importance_data is not None:
+                        # Global Importance Chart
                         imp_df = pd.DataFrame({'Feature': features, 'Value': importance_data}).sort_values(by='Value')
-                        fig_imp = px.bar(imp_df, x='Value', y='Feature', orientation='h', title="Feature Importance", template="plotly_dark")
+                        fig_imp = px.bar(
+                            imp_df, x='Value', y='Feature', orientation='h', 
+                            title=f"Global Drivers: Which features define {target}?",
+                            labels={'Value': label_type, 'Feature': 'Predictor Name'},
+                            template="plotly_dark", color='Value', color_continuous_scale='Blues'
+                        )
                         st.plotly_chart(fig_imp, use_container_width=True)
+
+                        # --- CATEGORY-SPECIFIC INSIGHTS ---
+                        if "Classification" in task and hasattr(model, 'coef_') and len(class_names) > 1:
+                            st.divider()
+                            st.write(f"#### 🔍 Deep Dive: What pushes someone into a specific {target}?")
+                            
+                            selected_class = st.selectbox(f"Select a category to see its specific drivers:", class_names)
+                            class_idx = class_names.index(selected_class)
+                            class_coefs = model.coef_[class_idx] if len(model.coef_.shape) > 1 else model.coef_
+                            
+                            class_imp_df = pd.DataFrame({'Feature': features, 'Influence': class_coefs}).sort_values(by='Influence')
+                            
+                            fig_class = px.bar(
+                                class_imp_df, x='Influence', y='Feature', orientation='h',
+                                title=f"Influence Map for category: '{selected_class}'",
+                                labels={'Influence': 'Directional Influence (Negative = Away, Positive = Towards)'},
+                                template="plotly_dark", color='Influence', color_continuous_scale='RdBu'
+                            )
+                            st.plotly_chart(fig_class, use_container_width=True)
+                            st.info(f"💡 **How to read this:** Blue bars push the prediction **towards** {selected_class}. Red bars push it **away**.")
 
                 except Exception as e:
                     st.error(f"⚠️ Training Error: {str(e)}")
