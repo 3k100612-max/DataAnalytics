@@ -59,6 +59,10 @@ st.set_page_config(page_title="GPAI Data Pro", layout="wide", page_icon="🧪")
 st.title("🧪 Advanced ML Workshop & Data Warehouse")
 st.caption(f"Server Date: 2026-06-06 | Sequential RAM Management | @timothymarkbale2026")
 
+# Initialize Session State for ML Results
+if 'ml_results' not in st.session_state:
+    st.session_state.ml_results = None
+
 with st.sidebar:
     st.header("🖥️ System Status")
     vps_mem = get_vps_ram()
@@ -88,10 +92,16 @@ if uploaded_file:
     # --- PATH A: EXPLORATORY ANALYSIS ---
     if mode == "Exploratory Analysis (PCA & Heatmap)":
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        st.info("💡 Exploratory Analysis helps you find patterns before training an AI. We use PCA to simplify data and Heatmaps to see how variables dance together.")
+        
         col_a, col_b = st.columns(2)
         
         with col_a:
-            st.write("### PCA Projection")
+            st.write("### 💎 PCA (Dimensionality Reduction)")
+            with st.expander("📖 The PCA Explainer (The Shadow Analogy)"):
+                st.write("Imagine holding a 3D object in front of a flashlight. The shadow on the wall is 2D. PCA finds the best angle to hold the object so the shadow tells you the most about its shape.")
+                st.latex(r"\text{Variance} = \frac{\sum (x_i - \bar{x})^2}{n-1}")
+            
             pca_feats = st.multiselect("Select Numeric Features for PCA:", num_cols, default=num_cols[:min(3, len(num_cols))])
             target_color = st.selectbox("Color Map by (Label):", df.columns)
             
@@ -99,18 +109,44 @@ if uploaded_file:
                 X_pca = StandardScaler().fit_transform(df[pca_feats])
                 pca = PCA(n_components=2)
                 comps = pca.fit_transform(X_pca)
+                
                 pdf = pd.DataFrame(comps, columns=['PC1', 'PC2'])
                 pdf[target_color] = df[target_color].values
                 fig_pca = px.scatter(pdf, x='PC1', y='PC2', color=target_color, template="plotly_dark", title=f"PCA: {target_color}")
                 st.plotly_chart(fig_pca, use_container_width=True)
 
+                # PCA Logic Visualizers
+                st.write("#### 🧠 PCA Logic Visualizer")
+                l_col1, l_col2 = st.columns(2)
+                with l_col1:
+                    var_exp = pca.explained_variance_ratio_
+                    fig_var = px.bar(x=['PC1', 'PC2'], y=var_exp, labels={'x': 'Component', 'y': '% Information Kept'},
+                                     title="Information Retention", template="plotly_dark")
+                    st.plotly_chart(fig_var, use_container_width=True)
+                with l_col2:
+                    loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=pca_feats)
+                    fig_load = px.bar(loadings, barmode='group', title="Feature Influence (Loadings)", template="plotly_dark")
+                    st.plotly_chart(fig_load, use_container_width=True)
+
         with col_b:
-            st.write("### Numerical Relationship Map")
+            st.write("### 🌡️ Relationship Heatmap")
+            with st.expander("📖 The Correlation Explainer (The Dance Analogy)"):
+                st.write("Correlation measures if two variables dance together.")
+                st.write("- **+1.0 (Blue):** Perfect sync. When one goes up, the other follows.")
+                st.write("- **-1.0 (Red):** Mirror opposites.")
+            
             if st.button("Generate Relationship Heatmap"):
                 fig, ax = plt.subplots(figsize=(10, 8))
-                sns.heatmap(df[num_cols].corr(), annot=True, fmt=".2f", cmap="coolwarm", ax=ax)
+                corr_matrix = df[num_cols].corr()
+                sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="RdBu", ax=ax, center=0)
                 ax.set_title("Feature Correlation Heatmap")
                 st.pyplot(fig)
+                
+                # Heatmap Logic Insight
+                corr_unstack = corr_matrix.unstack()
+                strongest = corr_unstack[corr_unstack < 0.99].abs().idxmax()
+                val = corr_matrix.loc[strongest[0], strongest[1]]
+                st.success(f"**Insight:** The strongest relationship is between **{strongest[0]}** and **{strongest[1]}** ({val:.2f}).")
 
     # --- PATH B: MACHINE LEARNING WORKSHOP ---
     elif mode == "Machine Learning Workshop":
@@ -145,10 +181,7 @@ if uploaded_file:
             if "Decision Tree" in algo:
                 depth = st.number_input("Select Max Tree Depth:", 1, 10, 5)
             
-            run_train = st.button("🚀 Start Model Training")
-
-        with m_col2:
-            if run_train and features:
+            if st.button("🚀 Start Model Training"):
                 try:
                     # --- 1. DATA PREPARATION ---
                     X, y = df[features], df[target]
@@ -175,89 +208,70 @@ if uploaded_file:
                     model.fit(X_tr_s, y_train)
                     preds = model.predict(X_te_s)
 
-                    # --- 3. PERFORMANCE VISUALS ---
-                    st.write(f"### 🎯 Results for {target}")
-                    p_col1, p_col2 = st.columns(2)
-                    
-                    with p_col1:
-                        if "Classification" in task:
-                            cm = confusion_matrix(y_test, preds.astype(int))
-                            fig, ax = plt.subplots()
-                            sns.heatmap(cm, annot=True, fmt='d', cmap="Purples", xticklabels=class_names, yticklabels=class_names)
-                            ax.set_title(f"Accuracy: {accuracy_score(y_test, preds):.2%}")
-                            ax.set_xlabel(f"Predicted {target}"); ax.set_ylabel(f"Actual {target}")
-                            st.pyplot(fig)
-                            st.info("💡 **How to read:** The diagonal line from top-left to bottom-right shows correct predictions.")
-                        else:
-                            fig_reg = px.scatter(x=y_test, y=preds, labels={'x': f'Actual {target}', 'y': f'Predicted {target}'}, 
-                                                 title=f"Regression Accuracy (R²: {r2_score(y_test, preds):.3f})", template="plotly_dark")
-                            fig_reg.add_shape(type="line", x0=y_test.min(), y0=y_test.min(), x1=y_test.max(), y1=y_test.max(), line=dict(color="Red", dash="dash"))
-                            st.plotly_chart(fig_reg, use_container_width=True)
-                            st.info("💡 **How to read:** The closer the dots are to the **Red Line**, the more accurate the AI is.")
-
-                    # --- 4. ALGORITHM LOGIC VISUALIZER & EXPLAINER ---
-                    st.divider()
-                    st.write(f"### 🧠 {algo} Logic Explainer")
-                    
-                    if "Decision Tree" in algo:
-                        st.write("#### 🌳 The Decision Flow-Chart")
-                        fig_tree, ax_tree = plt.subplots(figsize=(12, 6))
-                        plot_tree(model, feature_names=features, class_names=class_names, filled=True, rounded=True, max_depth=2, ax=ax_tree, fontsize=10)
-                        st.pyplot(fig_tree)
-                        with st.expander("🔍 What is this map showing?"):
-                            st.write("This is the 'Brain' of the model. It shows the top levels of questions the AI asks to reach a conclusion.")
-                            st.write("- **Nodes (Boxes):** A question, like 'Is GenAI_Usage > 5.5?'.")
-                            st.write("- **Colors:** Darker colors mean the model is very sure about that specific path.")
-
-                    elif "Regression" in algo:
-                        with st.expander("🔍 How Regression works"):
-                            st.write("Regression acts like a **weighted scale**. It looks at every clue you gave it and assigns a 'Weight' (Coefficient).")
-                            st.latex(r"y = w_1x_1 + w_2x_2 + b")
-                            st.write("The AI finds the best mathematical line that minimizes the 'Error' between the line and your data points.")
-
-                    elif "KNN" in algo:
-                        with st.expander("🔍 How K-Nearest Neighbors works"):
-                            st.write("KNN uses **Geography**. It plots your data on a multi-dimensional map.")
-                            st.write("To predict a new point, it looks at the **5 closest neighbors** and takes a vote. 'Tell me who your neighbors are, and I'll tell you who you are.'")
-
-                    elif "SVM" in algo:
-                        with st.expander("🔍 How Support Vector Machine works"):
-                            st.write("SVM is about **Boundary Lines**. It tries to draw the widest possible 'No-Man's Land' (Margin) between different groups.")
-                            st.write("It focuses only on the data points right at the edge—the 'Support Vectors'.")
-
-                    # --- 5. PREDICTOR INFLUENCE ---
-                    st.divider()
-                    st.write(f"### 📊 Predictor Influence for {target}")
-                    importance_data = None
-                    if hasattr(model, 'feature_importances_'):
-                        importance_data = model.feature_importances_
-                        label_type = "Importance Score"
-                    elif hasattr(model, 'coef_'):
-                        importance_data = np.abs(model.coef_).mean(axis=0) if len(model.coef_.shape) > 1 else np.abs(model.coef_)
-                        label_type = "Impact Weight (Absolute)"
-
-                    if importance_data is not None:
-                        imp_df = pd.DataFrame({'Feature': features, 'Value': importance_data}).sort_values(by='Value')
-                        fig_imp = px.bar(imp_df, x='Value', y='Feature', orientation='h', 
-                                         title=f"Global Drivers: Which features define {target}?",
-                                         labels={'Value': label_type, 'Feature': 'Predictor Name'},
-                                         template="plotly_dark", color='Value', color_continuous_scale='Blues')
-                        st.plotly_chart(fig_imp, use_container_width=True)
-
-                        if "Classification" in task and hasattr(model, 'coef_') and len(class_names) > 1:
-                            st.write(f"#### 🔍 Category Deep-Dive")
-                            selected_class = st.selectbox(f"Select a category to see its specific drivers:", class_names)
-                            class_idx = class_names.index(selected_class)
-                            class_coefs = model.coef_[class_idx] if len(model.coef_.shape) > 1 else model.coef_
-                            class_imp_df = pd.DataFrame({'Feature': features, 'Influence': class_coefs}).sort_values(by='Influence')
-                            fig_class = px.bar(class_imp_df, x='Influence', y='Feature', orientation='h',
-                                               title=f"Influence Map for: '{selected_class}'", template="plotly_dark", 
-                                               color='Influence', color_continuous_scale='RdBu')
-                            st.plotly_chart(fig_class, use_container_width=True)
-                            st.info("💡 **Blue bars** push the prediction **towards** this category. **Red bars** push it away.")
-
+                    # Save to Session State
+                    st.session_state.ml_results = {
+                        'model': model, 'target': target, 'features': features, 'task': task,
+                        'algo': algo, 'class_names': class_names, 'y_test': y_test, 'preds': preds
+                    }
                 except Exception as e:
                     st.error(f"⚠️ Training Error: {str(e)}")
+
+        with m_col2:
+            if st.session_state.ml_results:
+                res = st.session_state.ml_results
+                model = res['model']
+                
+                # --- 3. PERFORMANCE VISUALS ---
+                st.write(f"### 🎯 Results for {res['target']}")
+                if "Classification" in res['task']:
+                    cm = confusion_matrix(res['y_test'], res['preds'].astype(int))
+                    fig, ax = plt.subplots()
+                    sns.heatmap(cm, annot=True, fmt='d', cmap="Purples", xticklabels=res['class_names'], yticklabels=res['class_names'])
+                    ax.set_title(f"Accuracy: {accuracy_score(res['y_test'], res['preds']):.2%}")
+                    st.pyplot(fig)
+                    st.info("💡 **How to read:** The diagonal squares show correct guesses. Other squares are mistakes.")
+                else:
+                    fig_reg = px.scatter(x=res['y_test'], y=res['preds'], labels={'x': f'Actual {res["target"]}', 'y': f'Predicted {res["target"]}'}, 
+                                         title=f"Regression Accuracy (R²: {r2_score(res['y_test'], res['preds']):.3f})", template="plotly_dark")
+                    fig_reg.add_shape(type="line", x0=res['y_test'].min(), y0=res['y_test'].min(), x1=res['y_test'].max(), y1=res['y_test'].max(), line=dict(color="Red", dash="dash"))
+                    st.plotly_chart(fig_reg, use_container_width=True)
+                    st.info("💡 **How to read:** The closer the dots are to the **Red Line**, the more accurate the AI is.")
+
+                # --- 4. ALGORITHM LOGIC EXPLAINER ---
+                st.divider()
+                st.write(f"### 🧠 {res['algo']} Logic Explainer")
+                if "Decision Tree" in res['algo']:
+                    fig_tree, ax_tree = plt.subplots(figsize=(12, 6))
+                    plot_tree(model, feature_names=res['features'], class_names=res['class_names'], filled=True, rounded=True, max_depth=2, ax=ax_tree)
+                    st.pyplot(fig_tree)
+                elif "Regression" in res['algo']:
+                    with st.expander("🔍 How Regression works"):
+                        st.write("Regression acts like a weighted scale. It assigns a Weight (Coefficient) to every clue.")
+                        st.latex(r"y = w_1x_1 + w_2x_2 + b")
+
+                # --- 5. PREDICTOR INFLUENCE ---
+                st.divider()
+                st.write(f"### 📊 Predictor Influence for {res['target']}")
+                importance_data = None
+                if hasattr(model, 'feature_importances_'):
+                    importance_data = model.feature_importances_
+                elif hasattr(model, 'coef_'):
+                    importance_data = np.abs(model.coef_).mean(axis=0) if len(model.coef_.shape) > 1 else np.abs(model.coef_)
+
+                if importance_data is not None:
+                    imp_df = pd.DataFrame({'Feature': res['features'], 'Value': importance_data}).sort_values(by='Value')
+                    fig_imp = px.bar(imp_df, x='Value', y='Feature', orientation='h', template="plotly_dark", color='Value')
+                    st.plotly_chart(fig_imp, use_container_width=True)
+
+                    if "Classification" in res['task'] and hasattr(model, 'coef_') and len(res['class_names']) > 1:
+                        st.write("#### 🔍 Category Deep-Dive")
+                        selected_class = st.selectbox("Select a category:", res['class_names'], key="dd_select")
+                        class_idx = res['class_names'].index(selected_class)
+                        class_coefs = model.coef_[class_idx] if len(model.coef_.shape) > 1 else model.coef_
+                        class_imp_df = pd.DataFrame({'Feature': res['features'], 'Influence': class_coefs}).sort_values(by='Influence')
+                        fig_class = px.bar(class_imp_df, x='Influence', y='Feature', orientation='h', title=f"Influence for: {selected_class}", template="plotly_dark", color='Influence', color_continuous_scale='RdBu')
+                        st.plotly_chart(fig_class, use_container_width=True)
+                        st.info("💡 **Blue bars** push the prediction **towards** this category. **Red bars** push it away.")
 
 # Footer
 st.markdown("---")
