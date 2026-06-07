@@ -186,77 +186,77 @@ if uploaded_file:
             
             run_train = st.button("🚀 Start Training")
 
-       with m_col2:
-    if run_train and features:
-        try:
-            # --- 1. DATA PREPARATION ---
-            X, y = df[features], df[target]
-            if "Classification" in task:
-                le = LabelEncoder()
-                y = le.fit_transform(y.astype(str))
-                class_names = [str(c) for c in le.classes_]
+            with m_col2:
+                if run_train and features:
+                    try:
+                        # --- 1. DATA PREPARATION ---
+                        X, y = df[features], df[target]
+                        if "Classification" in task:
+                            le = LabelEncoder()
+                            y = le.fit_transform(y.astype(str))
+                            class_names = [str(c) for c in le.classes_]
+                        
+                        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                        
+                        scaler = StandardScaler()
+                        X_tr_s = scaler.fit_transform(X_train)
+                        X_te_s = scaler.transform(X_test)
             
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                        # --- 2. MODEL SELECTION ---
+                        if algo == "Linear/Logistic Regression":
+                            model = LogisticRegression(max_iter=1000) if "Classification" in task else LinearRegression()
+                        elif algo == "Decision Tree (CART)":
+                            model = DecisionTreeClassifier(max_depth=depth) if "Classification" in task else DecisionTreeRegressor(max_depth=depth)
+                        elif algo == "Naive Bayes": model = GaussianNB()
+                        elif algo == "KNN": model = KNeighborsClassifier() if "Classification" in task else KNeighborsRegressor()
+                        elif algo == "SVM": model = SVC() if "Classification" in task else SVR()
             
-            scaler = StandardScaler()
-            X_tr_s = scaler.fit_transform(X_train)
-            X_te_s = scaler.transform(X_test)
-
-            # --- 2. MODEL SELECTION ---
-            if algo == "Linear/Logistic Regression":
-                model = LogisticRegression(max_iter=1000) if "Classification" in task else LinearRegression()
-            elif algo == "Decision Tree (CART)":
-                model = DecisionTreeClassifier(max_depth=depth) if "Classification" in task else DecisionTreeRegressor(max_depth=depth)
-            elif algo == "Naive Bayes": model = GaussianNB()
-            elif algo == "KNN": model = KNeighborsClassifier() if "Classification" in task else KNeighborsRegressor()
-            elif algo == "SVM": model = SVC() if "Classification" in task else SVR()
-
-            model.fit(X_tr_s, y_train)
-            preds = model.predict(X_te_s)
-
-            # --- 3. PERFORMANCE VISUAL (Target Labeling) ---
-            st.write(f"### 🎯 Model Performance for {target}")
-            if "Classification" in task:
-                cm = confusion_matrix(y_test, preds.astype(int))
-                fig, ax = plt.subplots()
-                sns.heatmap(cm, annot=True, fmt='d', cmap="Purples", xticklabels=class_names, yticklabels=class_names)
-                ax.set_title(f"Accuracy: {accuracy_score(y_test, preds):.2%}")
-                ax.set_xlabel(f"Predicted {target}"); ax.set_ylabel(f"Actual {target}")
-                st.pyplot(fig)
-            else:
-                fig_reg = px.scatter(x=y_test, y=preds, labels={'x': f'Actual {target}', 'y': f'Predicted {target}'}, 
-                                     title=f"Regression: Actual vs Predicted {target}", template="plotly_dark")
-                fig_reg.add_shape(type="line", x0=y_test.min(), y0=y_test.min(), x1=y_test.max(), y1=y_test.max(), line=dict(color="Red", dash="dash"))
-                st.plotly_chart(fig_reg, use_container_width=True)
-
-            # --- 4. PREDICTOR LABELING (Feature Importance) ---
-            st.write("### 📊 Predictor Influence Analysis")
-            st.caption(f"The following features were used as predictors: {', '.join(features)}")
+                        model.fit(X_tr_s, y_train)
+                        preds = model.predict(X_te_s)
             
-            # Extract Importance/Coefficients
-            importance_data = None
-            if hasattr(model, 'feature_importances_'):
-                importance_data = model.feature_importances_
-                label_type = "Importance Score"
-            elif hasattr(model, 'coef_'):
-                # For multi-class logistic, we take the mean of absolute coefficients
-                importance_data = np.abs(model.coef_).mean(axis=0) if len(model.coef_.shape) > 1 else np.abs(model.coef_)
-                label_type = "Impact Weight (Absolute)"
-
-            if importance_data is not None:
-                imp_df = pd.DataFrame({'Feature': features, 'Value': importance_data}).sort_values(by='Value', ascending=True)
-                fig_imp = px.bar(imp_df, x='Value', y='Feature', orientation='h', 
-                                 title=f"Which Predictors influenced {target} the most?",
-                                 labels={'Value': label_type, 'Feature': 'Predictor Name'},
-                                 template="plotly_dark", color='Value', color_continuous_scale='Viridis')
-                st.plotly_chart(fig_imp, use_container_width=True)
-            else:
-                st.info(f"Note: The {algo} algorithm uses distance-based logic (KNN/SVM/NB), so individual feature weights are not displayed as a bar chart.")
-
-        except Exception as e:
-            st.error(f"⚠️ Training Error: {str(e)}")
-
+                        # --- 3. PERFORMANCE VISUAL (Target Labeling) ---
+                        st.write(f"### 🎯 Model Performance for {target}")
+                        if "Classification" in task:
+                            cm = confusion_matrix(y_test, preds.astype(int))
+                            fig, ax = plt.subplots()
+                            sns.heatmap(cm, annot=True, fmt='d', cmap="Purples", xticklabels=class_names, yticklabels=class_names)
+                            ax.set_title(f"Accuracy: {accuracy_score(y_test, preds):.2%}")
+                            ax.set_xlabel(f"Predicted {target}"); ax.set_ylabel(f"Actual {target}")
+                            st.pyplot(fig)
+                        else:
+                            fig_reg = px.scatter(x=y_test, y=preds, labels={'x': f'Actual {target}', 'y': f'Predicted {target}'}, 
+                                                 title=f"Regression: Actual vs Predicted {target}", template="plotly_dark")
+                            fig_reg.add_shape(type="line", x0=y_test.min(), y0=y_test.min(), x1=y_test.max(), y1=y_test.max(), line=dict(color="Red", dash="dash"))
+                            st.plotly_chart(fig_reg, use_container_width=True)
             
+                        # --- 4. PREDICTOR LABELING (Feature Importance) ---
+                        st.write("### 📊 Predictor Influence Analysis")
+                        st.caption(f"The following features were used as predictors: {', '.join(features)}")
+                        
+                        # Extract Importance/Coefficients
+                        importance_data = None
+                        if hasattr(model, 'feature_importances_'):
+                            importance_data = model.feature_importances_
+                            label_type = "Importance Score"
+                        elif hasattr(model, 'coef_'):
+                            # For multi-class logistic, we take the mean of absolute coefficients
+                            importance_data = np.abs(model.coef_).mean(axis=0) if len(model.coef_.shape) > 1 else np.abs(model.coef_)
+                            label_type = "Impact Weight (Absolute)"
+            
+                        if importance_data is not None:
+                            imp_df = pd.DataFrame({'Feature': features, 'Value': importance_data}).sort_values(by='Value', ascending=True)
+                            fig_imp = px.bar(imp_df, x='Value', y='Feature', orientation='h', 
+                                             title=f"Which Predictors influenced {target} the most?",
+                                             labels={'Value': label_type, 'Feature': 'Predictor Name'},
+                                             template="plotly_dark", color='Value', color_continuous_scale='Viridis')
+                            st.plotly_chart(fig_imp, use_container_width=True)
+                        else:
+                            st.info(f"Note: The {algo} algorithm uses distance-based logic (KNN/SVM/NB), so individual feature weights are not displayed as a bar chart.")
+            
+                    except Exception as e:
+                        st.error(f"⚠️ Training Error: {str(e)}")
+    
+                
             # --- STEP 7: CONDITIONAL DEPTH ---
             depth = 5
             if "Decision Tree" in algo:
