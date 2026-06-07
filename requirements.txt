@@ -9,3 +9,4 @@ xlsxwriter
 beautifulsoup4
 requests
 lxml
+psutil
