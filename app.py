@@ -1,11 +1,21 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import seaborn as sns
 import matplotlib.pyplot as plt
+import seaborn as sns
 import plotly.express as px
 import os
 import psutil
+
+# ML Imports
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor, plot_tree
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.svm import SVC, SVR
+from sklearn.metrics import r2_score, accuracy_score, confusion_matrix
 
 # --- MEMORY MONITORING ---
 try:
@@ -14,19 +24,9 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
-# ML Imports
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.metrics import mean_squared_error, r2_score, accuracy_score
-
-# --- OPTIMIZATION: DATA CACHING ---
+# --- OPTIMIZATION: CACHED DATA LOADER ---
 @st.cache_data
 def load_and_optimize(file, rows):
-    """Loads data and downcasts types to save RAM"""
     df = pd.read_csv(file, nrows=rows, low_memory=False)
     for col in df.columns:
         if df[col].dtype == 'float64':
@@ -36,97 +36,153 @@ def load_and_optimize(file, rows):
     return df
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="DataScience Pro 8GB", layout="wide")
-st.title("🌐 Data Warehouse & ML (8GB VPS Optimized)")
+st.set_page_config(page_title="DataScience Pro 8GB", layout="wide", page_icon="📊")
+st.title("📊 Advanced ML Workshop (8GB VPS)")
 
-# --- SIDEBAR: RESOURCE MONITOR ---
-st.sidebar.header("🖥️ VPS Status (8GB)")
+# --- SIDEBAR: RESOURCE MONITOR & COPYRIGHT ---
+st.sidebar.header("🖥️ VPS Status")
 if PSUTIL_AVAILABLE:
     process = psutil.Process(os.getpid())
     mem_usage = process.memory_info().rss / (1024 * 1024)
-    # Visualizing 8GB (8192MB) limit
     st.sidebar.progress(min(mem_usage / 8192, 1.0))
     st.sidebar.caption(f"RAM Usage: {mem_usage:.1f} MB / 8192 MB")
 
 st.sidebar.markdown("---")
-# Increased limit for 8GB RAM
 row_limit = st.sidebar.slider("Max Rows to Load", 1000, 1000000, 500000)
 
+# Sidebar Copyright
+st.sidebar.markdown("---")
+st.sidebar.write("© timothymarkbale2026")
+
+# --- 1. DATA LOADING & CLEANING ---
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
 if uploaded_file:
     try:
-        # Using the cached loader
-        df = load_and_optimize(uploaded_file, row_limit)
-        st.success(f"Successfully loaded {len(df)} rows into 8GB RAM.")
+        raw_df = load_and_optimize(uploaded_file, row_limit)
         
-        # --- 1. DATA EXPLORATION ---
-        st.header("1. Data Overview")
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        # Auto-Imputation (Filling Missing Data)
+        df = raw_df.copy()
+        num_cols = df.select_dtypes(include=[np.number]).columns
+        cat_cols = df.select_dtypes(exclude=[np.number]).columns
+        
+        for col in num_cols:
+            df[col] = df[col].fillna(df[col].median())
+        for col in cat_cols:
+            df[col] = df[col].fillna(df[col].mode()[0] if not df[col].mode().empty else "N/A")
+
+        st.success("✅ Data loaded and missing values filled automatically.")
+
+        # --- 2. MACHINE LEARNING WORKSHOP ---
+        st.header("🤖 Machine Learning Workshop")
+        
         all_cols = df.columns.tolist()
+        numeric_features = df.select_dtypes(include=[np.number]).columns.tolist()
         
-        col_a, col_b = st.columns(2)
-        col_a.dataframe(df.head(10))
+        col_set, col_res = st.columns([1, 2])
         
-        if len(numeric_cols) > 1:
-            with col_b:
-                st.write("Correlation Heatmap")
-                fig, ax = plt.subplots(figsize=(6, 4))
-                sns.heatmap(df[numeric_cols].corr(), cmap="viridis", ax=ax)
-                st.pyplot(fig)
-
-        # --- 2. MACHINE LEARNING ---
-        st.divider()
-        st.header("2. Machine Learning Workshop")
-        
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            target = st.selectbox("Target (Y):", all_cols)
-            features = st.multiselect("Features (X):", [c for c in numeric_cols if c != target])
-            task = st.radio("Task Type:", ["Classification", "Regression"])
+        with col_set:
+            target = st.selectbox("Select Target (Y):", all_cols)
+            features = st.multiselect("Select Features (X):", [c for c in numeric_features if c != target])
+            task = st.radio("Goal:", ["Classification (Groups)", "Regression (Numbers)"])
             
-            # Algorithm selection based on task
-            if task == "Classification":
-                algo = st.selectbox("Model:", ["Random Forest", "Logistic Regression", "Decision Tree"])
+            # Algorithm Selection
+            if task == "Classification (Groups)":
+                algo = st.selectbox("Algorithm:", ["Logistic Regression", "Decision Tree", "Naive Bayes", "KNN", "SVM"])
             else:
-                algo = st.selectbox("Model:", ["Random Forest", "Linear Regression", "Decision Tree"])
+                algo = st.selectbox("Algorithm:", ["Linear Regression", "Decision Tree", "KNN", "SVM"])
             
-            train_btn = st.button("🚀 Run Analysis")
+            train_btn = st.button("🚀 Train & Visualize")
 
-        with c2:
+        with col_res:
             if train_btn and features:
-                # Fill missing values for ML
-                X = df[features].fillna(df[features].mean())
+                X = df[features]
                 y = df[target]
                 
-                if task == "Classification":
+                if task == "Classification (Groups)":
                     le = LabelEncoder()
                     y = le.fit_transform(y.astype(str))
-                else:
-                    y = y.fillna(y.mean())
-
-                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
                 
-                # Model Initialization
-                if algo == "Random Forest":
-                    model = RandomForestClassifier() if task == "Classification" else RandomForestRegressor()
+                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                
+                # Scaling (Mandatory for distance-based algorithms)
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+                X_test_scaled = scaler.transform(X_test)
+
+                # --- MODEL INITIALIZATION ---
+                if algo == "Linear Regression": model = LinearRegression()
+                elif algo == "Logistic Regression": model = LogisticRegression()
                 elif algo == "Decision Tree":
-                    model = DecisionTreeClassifier() if task == "Classification" else DecisionTreeRegressor()
-                elif algo == "Linear Regression":
-                    model = LinearRegression()
-                else:
-                    model = LogisticRegression(max_iter=1000)
+                    model = DecisionTreeClassifier(max_depth=5) if task == "Classification (Groups)" else DecisionTreeRegressor(max_depth=5)
+                elif algo == "Naive Bayes": model = GaussianNB()
+                elif algo == "KNN":
+                    model = KNeighborsClassifier() if task == "Classification (Groups)" else KNeighborsRegressor()
+                elif algo == "SVM":
+                    model = SVC() if task == "Classification (Groups)" else SVR()
 
-                with st.spinner("Training Model..."):
-                    model.fit(X_train, y_train)
-                    preds = model.predict(X_test)
+                with st.spinner(f"Computing {algo}..."):
+                    model.fit(X_train_scaled, y_train)
+                    preds = model.predict(X_test_scaled)
                 
-                if task == "Classification":
-                    acc = accuracy_score(y_test, preds)
-                    st.metric("Model Accuracy", f"{acc:.2%}")
+                # Metrics
+                if task == "Classification (Groups)":
+                    st.metric("Accuracy", f"{accuracy_score(y_test, preds):.2%}")
                 else:
-                    r2 = r2_score(y_test, preds)
-                    st.metric("R² Prediction Score", f"{r2:.4f}")
+                    st.metric("R² Score", f"{r2_score(y_test, preds):.4f}")
+
+                # --- GRAPHICAL REPRESENTATION ---
+                st.subheader("📈 Graphical Representation")
+                
+                if task == "Regression (Numbers)" and len(features) == 1:
+                    plot_df = pd.DataFrame({features[0]: X_test[features[0]], "Actual": y_test, "Predicted": preds})
+                    fig = px.scatter(plot_df, x=features[0], y="Actual", title="Actual vs Predicted", template="plotly_dark")
+                    fig.add_traces(px.line(plot_df.sort_values(features[0]), x=features[0], y="Predicted").data)
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                elif task == "Classification (Groups)":
+                    cm = confusion_matrix(y_test, preds)
+                    fig, ax = plt.subplots(figsize=(5, 3))
+                    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+                    ax.set_xlabel("Predicted")
+                    ax.set_ylabel("Actual")
+                    st.pyplot(fig)
+                
+                else:
+                    fig = px.scatter(x=y_test, y=preds, labels={'x': 'Actual', 'y': 'Predicted'}, title="Model Precision Map", template="plotly_dark")
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # --- EDUCATIONAL BREAKDOWN ---
+                st.divider()
+                st.subheader("🧮 How was this computed?")
+                
+                with st.expander("See Mathematical Explanation"):
+                    if algo == "Linear Regression":
+                        st.latex(r"Y = \beta_0 + \beta_1X_1 + \dots + \epsilon")
+                        st.write("**Non-Technical:** The computer draws a 'Line of Best Fit' through your data.")
+                    
+                    elif algo == "Decision Tree":
+                        st.latex(r"Gini = 1 - \sum (P_i)^2")
+                        st.write("**Non-Technical:** Works like a flowchart using 'Yes/No' logic.")
+                        fig, ax = plt.subplots(figsize=(12, 6))
+                        plot_tree(model, feature_names=features, filled=True, max_depth=2)
+                        st.pyplot(fig)
+
+                    elif algo == "Naive Bayes":
+                        st.latex(r"P(A|B) = \frac{P(B|A) \cdot P(A)}{P(B)}")
+                        st.write("**Non-Technical:** Predicts based on the probability of past evidence.")
+
+                    elif algo == "KNN":
+                        st.latex(r"d = \sqrt{\sum(p_i - q_i)^2}")
+                        st.write("**Non-Technical:** Looks at the 5 closest 'neighbors' to make a prediction.")
+
+                    elif algo == "SVM":
+                        st.latex(r"\text{Minimize: } \frac{1}{2} ||w||^2")
+                        st.write("**Non-Technical:** Finds the widest possible boundary between groups.")
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
+        st.error(f"Error: {e}")
+
+# --- FOOTER COPYRIGHT ---
+st.markdown("---")
+st.markdown("<p style='text-align: center; color: grey;'>© timothymarkbale2026</p>", unsafe_allow_html=True)
