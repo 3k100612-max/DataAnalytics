@@ -56,9 +56,8 @@ def load_and_fix(file, rows):
     return df, total_missing
 
 # --- 3. UI CONFIGURATION ---
-st.set_page_config(page_title="GPAI Data Pro", layout="wide", page_icon="🧪")
-st.title("🧪 Advanced ML Workshop & Data Warehouse")
-st.caption(f"Server Date: 2026-06-06 | Sequential RAM Management | @timothymarkbale2026")
+st.set_page_config(page_title="Machine Learning Intuition Lab", layout="wide", page_icon="🧪")
+st.title("🧪 ML Modeling & Data Warehouse")
 
 # Initialize Session State
 if 'ml_results' not in st.session_state:
@@ -147,7 +146,7 @@ if uploaded_file:
                     st.warning("Not enough numeric columns to find relationships.")
 
     # --- PATH B: MACHINE LEARNING WORKSHOP ---
-    elif mode == "Machine Learning Workshop":
+    elif mode == "Train the Model - Machine Learning":
         st.subheader("🤖 Supervised Learning Workshop")
         m_col1, m_col2 = st.columns([1, 2])
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
