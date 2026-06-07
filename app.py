@@ -279,4 +279,4 @@ if uploaded_file:
 
 # Footer
 st.markdown("---")
-st.markdown("<p style='text-align: center; color: grey;'>© timothymarkbale2026 | Educational ML Workshop</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: grey;'>© timothymarkbale2026 | Educational ML Laboratory</p>", unsafe_allow_html=True)
