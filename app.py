@@ -57,7 +57,7 @@ def load_and_fix(file, rows):
 
 # --- 3. UI CONFIGURATION ---
 st.set_page_config(page_title="Machine Learning Intuition Lab", layout="wide", page_icon="🧪")
-st.title("🧪 ML Laboratory Simulation")
+st.title("🧪 Machine Learning Intuition Lab")
 
 # Initialize Session State
 if 'ml_results' not in st.session_state:
