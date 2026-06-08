@@ -146,7 +146,7 @@ if uploaded_file:
                     st.warning("Not enough numeric columns to find relationships.")
 
     # --- PATH B: MACHINE LEARNING WORKSHOP ---
-    elif mode == "Train the Model - Machine Learning Workshop":
+    elif mode == "Machine Learning Workshop":
         st.subheader("🤖 Supervised Learning Workshop")
         m_col1, m_col2 = st.columns([1, 2])
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
