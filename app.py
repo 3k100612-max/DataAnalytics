@@ -182,7 +182,7 @@ if uploaded_file:
                 else:
                     st.warning("Not enough numeric columns to find relationships.")
 
-    # --- PATH B: MACHINE LEARNING WORKSHOP ---
+        # --- PATH B: MACHINE LEARNING WORKSHOP ---
     elif mode == "Machine Learning Workshop":
         st.subheader("🤖 Supervised Learning Workshop")
         m_col1, m_col2 = st.columns([1, 2])
@@ -191,16 +191,25 @@ if uploaded_file:
         with m_col1:
             st.write("### ⚙️ Model Configuration")
             target = st.selectbox("1. Target to Predict (Y):", df.columns)
+            
+            # --- NEW SAFETY CHECK ---
+            unique_count = df[target].nunique()
+            is_numeric_target = pd.api.types.is_numeric_dtype(df[target])
+            
+            task = st.radio("2. Task Type:", ["Classification (Group)", "Regression (Value)"])
+            
+            if task == "Classification (Group)" and unique_count > 20:
+                st.warning(f"⚠️ **High Complexity:** '{target}' has {unique_count} unique categories. Classification works best with < 20 groups. Consider using Regression or a different column.")
+
             available_predictors = [col for col in num_cols if col != target]
             
             if st.checkbox("Rank Predictors by Relevance?", value=True):
-                if target in num_cols:
+                if is_numeric_target:
                     correlations = df[num_cols].corr()[target].abs().sort_values(ascending=False)
                     available_predictors = correlations.drop(labels=[target]).index.tolist()
                     st.caption(f"💡 Best Clue: **{available_predictors[0]}**")
 
-            features = st.multiselect("2. Select Clues (X):", options=available_predictors)
-            task = st.radio("3. Task Type:", ["Classification (Group)", "Regression (Value)"])
+            features = st.multiselect("3. Select Clues (X):", options=available_predictors)
             algo = st.selectbox("4. Algorithm:", ["Linear/Logistic Regression", "Decision Tree (CART)", "Naive Bayes", "KNN", "SVM"])
             
             depth = 5
@@ -208,33 +217,36 @@ if uploaded_file:
                 depth = st.number_input("Select Max Tree Depth:", 1, 10, 5)
             
             if st.button("🚀 Start Model Training"):
-                try:
-                    X, y = df[features], df[target]
-                    class_names = None
-                    if "Classification" in task:
-                        le = LabelEncoder()
-                        y = le.fit_transform(y.astype(str))
-                        class_names = [str(c) for c in le.classes_]
-                    
-                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                    scaler = StandardScaler().fit(X_train)
-                    X_tr_s, X_te_s = scaler.transform(X_train), scaler.transform(X_test)
+                if not features:
+                    st.error("Please select at least one feature (Clue) to train.")
+                else:
+                    try:
+                        X, y = df[features], df[target]
+                        class_names = None
+                        if "Classification" in task:
+                            le = LabelEncoder()
+                            y = le.fit_transform(y.astype(str))
+                            class_names = [str(c) for c in le.classes_]
+                        
+                        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                        scaler = StandardScaler().fit(X_train)
+                        X_tr_s, X_te_s = scaler.transform(X_train), scaler.transform(X_test)
 
-                    if algo == "Linear/Logistic Regression":
-                        model = LogisticRegression(max_iter=1000) if "Classification" in task else LinearRegression()
-                    elif algo == "Decision Tree (CART)":
-                        model = DecisionTreeClassifier(max_depth=depth) if "Classification" in task else DecisionTreeRegressor(max_depth=depth)
-                    elif algo == "Naive Bayes": model = GaussianNB()
-                    elif algo == "KNN": model = KNeighborsClassifier() if "Classification" in task else KNeighborsRegressor()
-                    elif algo == "SVM": model = SVC() if "Classification" in task else SVR()
+                        if algo == "Linear/Logistic Regression":
+                            model = LogisticRegression(max_iter=1000) if "Classification" in task else LinearRegression()
+                        elif algo == "Decision Tree (CART)":
+                            model = DecisionTreeClassifier(max_depth=depth) if "Classification" in task else DecisionTreeRegressor(max_depth=depth)
+                        elif algo == "Naive Bayes": model = GaussianNB()
+                        elif algo == "KNN": model = KNeighborsClassifier() if "Classification" in task else KNeighborsRegressor()
+                        elif algo == "SVM": model = SVC() if "Classification" in task else SVR()
 
-                    model.fit(X_tr_s, y_train)
-                    st.session_state.ml_results = {
-                        'model': model, 'target': target, 'features': features, 'task': task,
-                        'algo': algo, 'class_names': class_names, 'y_test': y_test, 
-                        'preds': model.predict(X_te_s), 'X_test_scaled': X_te_s
-                    }
-                except Exception as e: st.error(f"⚠️ Error: {str(e)}")
+                        model.fit(X_tr_s, y_train)
+                        st.session_state.ml_results = {
+                            'model': model, 'target': target, 'features': features, 'task': task,
+                            'algo': algo, 'class_names': class_names, 'y_test': y_test, 
+                            'preds': model.predict(X_te_s), 'X_test_scaled': X_te_s
+                        }
+                    except Exception as e: st.error(f"⚠️ Error: {str(e)}")
 
         with m_col2:
             if st.session_state.ml_results:
@@ -243,16 +255,33 @@ if uploaded_file:
                 
                 st.write(f"### 🎯 Results for {res['target']}")
                 if "Classification" in res['task']:
+                    acc = accuracy_score(res['y_test'], res['preds'])
                     cm = confusion_matrix(res['y_test'], res['preds'].astype(int))
-                    fig, ax = plt.subplots(figsize=(5,4))
-                    sns.heatmap(cm, annot=True, fmt='d', cmap="Purples", xticklabels=res['class_names'], yticklabels=res['class_names'], ax=ax)
-                    ax.set_title(f"Accuracy: {accuracy_score(res['y_test'], res['preds']):.2%}")
+                    
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    
+                    # IMPROVED HEATMAP LOGIC
+                    show_labels = len(res['class_names']) < 15 # Hide labels if too many
+                    sns.heatmap(cm, annot=show_labels, fmt='d', cmap="Purples", 
+                                xticklabels=res['class_names'] if show_labels else False, 
+                                yticklabels=res['class_names'] if show_labels else False, ax=ax)
+                    
+                    plt.xticks(rotation=45)
+                    ax.set_title(f"Accuracy: {acc:.2%}")
                     st.pyplot(fig)
                     plt.close(fig)
+                    
+                    if not show_labels:
+                        st.info(f"💡 Labels hidden because there are {len(res['class_names'])} categories. Try a simpler target.")
                 else:
-                    fig_reg = px.scatter(x=res['y_test'], y=res['preds'], labels={'x': 'Actual', 'y': 'Predicted'}, title="Regression Accuracy")
-                    fig_reg.add_shape(type="line", x0=min(res['y_test']), y0=min(res['y_test']), x1=max(res['y_test']), y1=max(res['y_test']), line=dict(color="Red", dash="dash"))
+                    # Regression Plot
+                    fig_reg = px.scatter(x=res['y_test'], y=res['preds'], 
+                                       labels={'x': 'Actual Value', 'y': 'Predicted Value'}, 
+                                       title=f"Regression: Actual vs Predicted (R²: {r2_score(res['y_test'], res['preds']):.2f})")
+                    fig_reg.add_shape(type="line", x0=min(res['y_test']), y0=min(res['y_test']), 
+                                    x1=max(res['y_test']), y1=max(res['y_test']), line=dict(color="Red", dash="dash"))
                     st.plotly_chart(fig_reg, use_container_width=True)
+
 
                 st.divider()
                 st.write(f"### 🧠 {res['algo']} Logic Explainer")
