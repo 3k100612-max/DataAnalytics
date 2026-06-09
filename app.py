@@ -245,7 +245,7 @@ if uploaded_file:
                         st.session_state.ml_results = {
                             'model': model, 'target': target, 'features': features, 'task': task,
                             'algo': algo, 'class_names': class_names, 'y_test': y_test, 
-                            'preds': model.predict(X_te_s), 'X_test_scaled': X_te_s
+                            'preds': model.predict(X_te_s), 'X_test_scaled': X_te_s ,'tree_depth': tree_depth
                         }
                     except Exception as e: st.error(f"⚠️ Error: {str(e)}")
 
