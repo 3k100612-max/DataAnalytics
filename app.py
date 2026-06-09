@@ -62,8 +62,6 @@ st.title("🧪 Machine Learning Intuition Lab")
 hide_st_style = """
             <style>
             footer {visibility: hidden;}
-            #MainMenu {visibility: hidden;} /* Optional: hides the top-right menu too */
-            header {visibility: hidden;}   /* Optional: hides the top header bar */
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
