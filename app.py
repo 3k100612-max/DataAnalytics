@@ -95,34 +95,78 @@ if uploaded_file:
         
         col_a, col_b = st.columns(2)
         
-        with col_a:
-            st.write("### 💎 PCA (Dimensionality Reduction)")
-            with st.expander("📖 The Shadow Analogy (Explainer)"):
-                st.write("Imagine holding a 3D teapot in front of a flashlight. The shadow on the wall is 2D. **PCA** finds the best angle to hold the teapot so the shadow captures the most detail.")
-            
-            pca_feats = st.multiselect("Select Numeric Columns to Compress:", num_cols, default=num_cols[:min(3, len(num_cols))])
-            target_color = st.selectbox("Color Map by:", df.columns)
-            
-            if st.button("Generate PCA Insights") and len(pca_feats) >= 2:
-                X_pca = StandardScaler().fit_transform(df[pca_feats])
-                pca = PCA(n_components=2)
-                comps = pca.fit_transform(X_pca)
-                
-                pdf = pd.DataFrame(comps, columns=['PC1', 'PC2'])
-                pdf[target_color] = df[target_color].values
-                fig_pca = px.scatter(pdf, x='PC1', y='PC2', color=target_color, title=f"PCA Visualization: {target_color}")
-                st.plotly_chart(fig_pca, use_container_width=True, theme="streamlit")
+       with col_a:
+    st.write("### 💎 PCA (Dimensionality Reduction)")
+    with st.expander("📖 The Shadow Analogy (Explainer)"):
+        st.write("Imagine holding a 3D teapot in front of a flashlight. The shadow on the wall is 2D. **PCA** finds the best angle to hold the teapot so the shadow captures the most detail.")
+    
+    pca_feats = st.multiselect("Select Numeric Columns to Compress:", num_cols, default=num_cols[:min(3, len(num_cols))])
+    target_color = st.selectbox("Color Map by:", df.columns, key="pca_color")
+    
+    if st.button("Generate PCA Insights") and len(pca_feats) >= 2:
+        # 1. Scaling and Transformation
+        X_pca = StandardScaler().fit_transform(df[pca_feats])
+        pca = PCA(n_components=2)
+        comps = pca.fit_transform(X_pca)
+        
+        # 2. Extract Loadings (Feature Influence)
+        loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=pca_feats)
+        
+        # 3. IDENTIFY TOP DRIVERS: Find which original column has the highest absolute weight
+        top_driver_pc1 = loadings['PC1'].abs().idxmax()
+        top_driver_pc2 = loadings['PC2'].abs().idxmax()
+        
+        # 4. CREATE DYNAMIC LABELS: Include % Variance and the Primary Driver
+        var_pc1 = pca.explained_variance_ratio_[0] * 100
+        var_pc2 = pca.explained_variance_ratio_[1] * 100
+        
+        label_x = f"PC1 ({var_pc1:.1f}%) — Primary Driver: {top_driver_pc1}"
+        label_y = f"PC2 ({var_pc2:.1f}%) — Primary Driver: {top_driver_pc2}"
+        
+        # 5. Generate Main Scatter Plot
+        pdf = pd.DataFrame(comps, columns=['PC1', 'PC2'])
+        pdf[target_color] = df[target_color].values
+        
+        fig_pca = px.scatter(
+            pdf, x='PC1', y='PC2', color=target_color, 
+            title=f"PCA: {target_color} Distribution",
+            labels={'PC1': label_x, 'PC2': label_y}, # Dynamic Labeling
+            template="plotly_white"
+        )
+        st.plotly_chart(fig_pca, use_container_width=True)
 
-                # Logic Visualizer
-                st.write("#### 🧠 PCA Logic Visualizer")
-                l_col1, l_col2 = st.columns(2)
-                with l_col1:
-                    fig_var = px.bar(x=['PC1', 'PC2'], y=pca.explained_variance_ratio_, title="Info Retained", labels={'y':'% Info'})
-                    st.plotly_chart(fig_var, use_container_width=True)
-                with l_col2:
-                    loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=pca_feats)
-                    fig_load = px.bar(loadings, barmode='group', title="Feature Influence")
-                    st.plotly_chart(fig_load, use_container_width=True)
+        # 6. Logic Visualizer (The "Why")
+        st.write("#### 🧠 PCA Logic Visualizer")
+        l_col1, l_col2 = st.columns(2)
+        
+        with l_col1:
+            # Explained Variance Chart
+            fig_var = px.bar(
+                x=['PC1', 'PC2'], 
+                y=pca.explained_variance_ratio_, 
+                title="Information Retention", 
+                labels={'y':'% Info Retained', 'x': 'Component'},
+                color_discrete_sequence=['#636EFA']
+            )
+            st.plotly_chart(fig_var, use_container_width=True)
+            
+        with l_col2:
+            # Feature Influence (Loadings) Chart
+            fig_load = px.bar(
+                loadings, 
+                barmode='group', 
+                title="Feature Influence (Loadings)",
+                labels={'index': 'Features', 'value': 'Weight'}
+            )
+            st.plotly_chart(fig_load, use_container_width=True)
+
+        # 7. Narrative Summary (Business Insights)
+        st.info(f"""
+        **Insight Summary:**
+        * **PC1** represents **{var_pc1:.1f}%** of the dataset's variance and is most heavily influenced by **{top_driver_pc1}**.
+        * **PC2** represents **{var_pc2:.1f}%** of the variance and is primarily driven by **{top_driver_pc2}**.
+        * If points are grouped by color, it means **{target_color}** is strongly related to these two drivers.
+        """)
 
         with col_b:
             st.write("### 🌡️ Relationship Heatmap")
