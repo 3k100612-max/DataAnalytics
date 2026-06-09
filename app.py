@@ -211,7 +211,7 @@ if uploaded_file:
                     st.caption(f"💡 Best Clue: **{available_predictors[0]}**")
 
             features = st.multiselect("3. Select Clues (X):", options=available_predictors)
-            algo = st.selectbox("4. Algorithm:", ["Linear/Logistic Regression", "Decision Tree (CART)", "Naive Bayes", "KNN", "SVM"])
+            algo = st.selectbox("4. Algorithm:", ["Linear/Logistic Regression", "Decision Tree", "Naive Bayes", "KNN", "SVM"])
             
             depth = 5
             if "Decision Tree" in algo:
@@ -235,7 +235,7 @@ if uploaded_file:
 
                         if algo == "Linear/Logistic Regression":
                             model = LogisticRegression(max_iter=1000) if "Classification" in task else LinearRegression()
-                        elif algo == "Decision Tree (CART)":
+                        elif algo == "Decision Tree":
                             model = DecisionTreeClassifier(max_depth=depth) if "Classification" in task else DecisionTreeRegressor(max_depth=depth)
                         elif algo == "Naive Bayes": model = GaussianNB()
                         elif algo == "KNN": model = KNeighborsClassifier() if "Classification" in task else KNeighborsRegressor()
