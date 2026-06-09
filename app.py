@@ -61,7 +61,8 @@ st.set_page_config(page_title="Machine Learning Intuition Lab", layout="wide", p
 st.title("🧪 Machine Learning Intuition Lab")
 hide_st_style = """
             <style>
-            footer {display: none !important;}
+            footer {display: none !important;
+            div[data-testid="stFooter"] {display: none !important;}}
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
