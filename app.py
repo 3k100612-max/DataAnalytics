@@ -57,7 +57,7 @@ def load_and_fix(file, rows):
     return df, total_missing
 
 # --- 3. UI CONFIGURATION ---
-st.set_page_config(page_title="Machine Learning Intuition Lab", layout="wide", page_icon="🧪",menu_items={ 'Get Help': 'https://www.extremelycoolapp.com/help','Report a bug': "https://www.extremelycoolapp.com/bug",'About': " Machine Learning Intuition Lab A Project in Fullfillment with the Requirement of MSIT643 Submitted by Timothy Mark A. Bal-e"})
+st.set_page_config(page_title="Machine Learning Intuition Lab", layout="wide", page_icon="🧪",menu_items={'About': " Machine Learning Intuition Lab A Project in Fullfillment with the Requirement of MSIT643 Submitted by Timothy Mark A. Bal-e"})
 st.title("🧪 Machine Learning Intuition Lab")
 hide_st_style = """
             <style>
