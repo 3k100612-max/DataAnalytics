@@ -19,6 +19,7 @@ from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.svm import SVC, SVR
 from sklearn.metrics import r2_score, accuracy_score, confusion_matrix
 from sklearn.inspection import permutation_importance
+from sklearn.tree import export_graphviz
 
 # --- 1. SYSTEM & RAM MONITORING ---
 def get_vps_ram():
@@ -287,12 +288,32 @@ if uploaded_file:
                 st.write(f"### 🧠 {res['algo']} Logic Explainer")
                 
                 if "Decision Tree" in res['algo']:
-                    fig_tree, ax_tree = plt.subplots(figsize=(12, 6))
-                    plot_tree(model, feature_names=res['features'], class_names=res['class_names'], 
-                              filled=True, rounded=True, ax=ax_tree, fontsize=10)
-                    st.pyplot(fig_tree)
-                    plt.close(fig_tree)
-                    st.caption("💡 **How to read:** The tree asks 'Yes/No' questions. Follow the branches to see how the model reached its decision.")
+                    st.write(f"#### 🌳 Interactive Decision Path (Depth: {res['tree_depth']})")
+                    
+                    # 1. Export the tree to DOT format (Vector Data)
+                    dot_data = export_graphviz(
+                        model, 
+                        out_file=None, 
+                        feature_names=res['features'],
+                        class_names=res['class_names'],
+                        filled=True, 
+                        rounded=True,  
+                        special_characters=True,
+                        precision=2,
+                        leaves_parallel=False # Keeps the layout clean
+                    )
+                    
+                    # 2. Use st.graphviz_chart for an SVG-based, expandable visual
+                    # This allows the user to hover and zoom without losing quality
+                    st.graphviz_chart(dot_data, use_container_width=True)
+                    
+                    with st.expander("📝 How to read this expanded view"):
+                        st.markdown("""
+                        * **Color Intensity:** Darker colors mean the model is more 'confident' in that group.
+                        * **Gini/Entropy:** A lower number means the group is 'pure' (mostly one category).
+                        * **Samples:** Shows how many rows from your dataset fell into that specific branch.
+                        * **Fullscreen:** Hover over the top-right of the chart and click the arrows to expand.
+                        """)
 
                 elif "Regression" in res['algo']:
                     with st.expander("🔍 The 'Weight' Logic (Formula)"):
