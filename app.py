@@ -59,13 +59,12 @@ def load_and_fix(file, rows):
 # --- 3. UI CONFIGURATION ---
 st.set_page_config(page_title="Machine Learning Intuition Lab", layout="wide", page_icon="🧪",menu_items={'About': " Machine Learning Intuition Lab A Project in Fullfillment with the Requirement of MSIT643 Submitted by Timothy Mark A. Bal-e"})
 st.title("🧪 Machine Learning Intuition Lab")
-hide_st_style = """
-            <style>
-            footer {display: none !important;
-            div[data-testid="stFooter"] {display: none !important;}}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+st.markdown("""
+    <style>
+    footer {display: none !important;}
+    div[data-testid="stFooter"] {display: none !important;}
+    </style>
+    """, unsafe_allow_html=True)
 
 if 'ml_results' not in st.session_state:
     st.session_state.ml_results = None
