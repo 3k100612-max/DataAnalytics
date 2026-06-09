@@ -59,12 +59,29 @@ def load_and_fix(file, rows):
 # --- 3. UI CONFIGURATION ---
 st.set_page_config(page_title="Machine Learning Intuition Lab", layout="wide", page_icon="🧪",menu_items={'About': " Machine Learning Intuition Lab A Project in Fullfillment with the Requirement of MSIT643 Submitted by Timothy Mark A. Bal-e"})
 st.title("🧪 Machine Learning Intuition Lab")
-st.markdown("""
+hide_branding_style = """
     <style>
+    /* 1. Hide the footer at the very bottom of the page */
     footer {display: none !important;}
     div[data-testid="stFooter"] {display: none !important;}
+
+    /* 2. Hide the 'Made with Streamlit' text inside the Menu popover */
+    /* This targets the specific container at the bottom of the menu list */
+    ul[data-testid="main-menu-list"] > div:last-child {
+        display: none !important;
+    }
+    
+    /* 3. Optional: Hide the 'About', 'Report a bug', and 'Get Help' 
+       but keep Theme, Print, and Record */
+    ul[data-testid="main-menu-list"] > li:nth-child(1), /* Get Help */
+    ul[data-testid="main-menu-list"] > li:nth-child(2), /* Report a bug */
+    ul[data-testid="main-menu-list"] > li:nth-child(3)  /* About */
+    {
+        display: none !important;
+    }
     </style>
-    """, unsafe_allow_html=True)
+    """
+st.markdown(hide_branding_style, unsafe_allow_html=True)
 
 if 'ml_results' not in st.session_state:
     st.session_state.ml_results = None
