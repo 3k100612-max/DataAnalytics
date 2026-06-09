@@ -285,15 +285,40 @@ if uploaded_file:
 
                 st.divider()
                 st.write(f"### 🧠 {res['algo']} Logic Explainer")
+                
                 if "Decision Tree" in res['algo']:
                     fig_tree, ax_tree = plt.subplots(figsize=(12, 6))
-                    plot_tree(model, feature_names=res['features'], class_names=res['class_names'], filled=True, rounded=True, ax=ax_tree)
+                    plot_tree(model, feature_names=res['features'], class_names=res['class_names'], 
+                              filled=True, rounded=True, ax=ax_tree, fontsize=10)
                     st.pyplot(fig_tree)
                     plt.close(fig_tree)
+                    st.caption("💡 **How to read:** The tree asks 'Yes/No' questions. Follow the branches to see how the model reached its decision.")
+
                 elif "Regression" in res['algo']:
-                    with st.expander("🔍 How it works"):
-                        st.write("Regression assigns a 'Weight' to every clue.")
-                        st.latex(r"y = w_1x_1 + w_2x_2 + b")
+                    with st.expander("🔍 The 'Weight' Logic (Formula)"):
+                        st.write("Regression treats data like a scale. It assigns a **Weight ($w$)** to every clue to calculate the result.")
+                        st.latex(r"y = w_1x_1 + w_2x_2 + ... + b")
+                        st.info("Check the **Predictor Influence** chart below to see which clues have the heaviest weights!")
+
+                elif "KNN" in res['algo']:
+                    with st.expander("🔍 The 'Neighbor' Logic (Analogy)"):
+                        st.write("### 👥 'Show me who your friends are...'")
+                        st.write("**K-Nearest Neighbors** doesn't learn rules. Instead, it memorizes the entire dataset.")
+                        st.write("To make a prediction, it looks for the **K** (e.g., 5) most similar rows in the past data and averages their results.")
+                        st.success("It's like asking your 5 closest neighbors for advice before making a choice.")
+
+                elif "Naive Bayes" in res['algo']:
+                    with st.expander("🔍 The 'Probability' Logic (Math)"):
+                        st.write("### 📊 The 'Odds' Calculator")
+                        st.write("**Naive Bayes** calculates the probability of each category based on the clues provided.")
+                        st.latex(r"P(Category | Clues) = \frac{P(Clues | Category) \times P(Category)}{P(Clues)}")
+                        st.write("It is called **'Naive'** because it assumes every clue is 100% independent of the others.")
+
+                elif "SVM" in res['algo']:
+                    with st.expander("🔍 The 'Boundary' Logic (Visual)"):
+                        st.write("### 🚧 The Great Divide")
+                        st.write("**Support Vector Machines** try to find the best boundary (hyperplane) that separates different groups.")
+                        st.write("It looks for the 'Support Vectors'—the data points closest to the edge—and builds a wall to separate them.")
                 
                 st.divider()
                 st.write("### 📊 Predictor Influence")
