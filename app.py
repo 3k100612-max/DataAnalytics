@@ -366,42 +366,60 @@ if uploaded_file:
                     st.write("🎮 **Interactive Logic Explorer**")
                     st.caption("🖱️ **Zoom:** Mouse wheel | **Pan:** Click & Drag | **Reset:** Double-click")
                     
-                    # 2. Prepare data safely for Javascript
+                    # 2. Prepare data safely
                     import json
                     dot_json = json.dumps(dot_data)
                     
-                    # 3. The Zoom & Pan HTML/JS Component
+                    # 3. The "HPCC + SVG-Pan-Zoom" Hybrid
                     chart_html = f"""
-                    <div id="graph" style="width: 100%; height: 600px; border: 1px solid #d1d5db; border-radius: 8px; background: white; cursor: move;"></div>
+                    <div id="graph-container" style="width: 100%; height: 600px; border: 1px solid #d1d5db; border-radius: 8px; background: white; cursor: move; overflow: hidden;">
+                        <div id="placeholder" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #666;">
+                            Rendering Interactive Tree...
+                        </div>
+                    </div>
+
+                    <!-- Load the Zoom Library -->
+                    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
                     
-                    <!-- Load D3 and Graphviz Libraries -->
-                    <script src="https://d3js.org/d3.v5.min.js"></script>
-                    <script src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
-                    <script src="https://unpkg.com/d3-graphviz@3.0.5/build/d3-graphviz.js"></script>
-                    
-                    <script>
-                        const dotData = {dot_json};
+                    <script type="module">
+                        import {{ Graphviz }} from "https://cdn.jsdelivr.net/npm/@hpcc-js/wasm/dist/index.js";
                         
-                        // Initialize the graphviz renderer with zoom enabled
-                        d3.select("#graph")
-                          .graphviz()
-                          .width(window.innerWidth - 20)
-                          .height(600)
-                          .fit(true)          // Fits the tree to the window on start
-                          .zoom(true)         // Enables Zoom & Pan
-                          .renderDot(dotData);
-                          
-                        // Optional: Handle window resizing
-                        window.onresize = function() {{
-                            d3.select("#graph").graphviz().width(window.innerWidth - 20);
-                        }};
+                        async function render() {{
+                            try {{
+                                const graphviz = await Graphviz.load();
+                                const dot = {dot_json};
+                                const svgString = graphviz.dot(dot);
+                                
+                                const container = document.getElementById("placeholder");
+                                container.innerHTML = svgString;
+                                
+                                // Find the SVG element we just created
+                                const svgElement = container.querySelector("svg");
+                                svgElement.style.width = "100%";
+                                svgElement.style.height = "100%";
+                                
+                                // Initialize Zoom and Pan
+                                window.panZoom = svgPanZoom(svgElement, {{
+                                    zoomEnabled: true,
+                                    controlIconsEnabled: true,
+                                    fit: true,
+                                    center: true,
+                                    minZoom: 0.1,
+                                    maxZoom: 10
+                                }});
+                                
+                            }} catch (e) {{
+                                document.getElementById("placeholder").innerHTML = "❌ Error: " + e.message;
+                            }}
+                        }}
+                        render();
                     </script>
                     """
                     
-                    # 4. Render the component in Streamlit
+                    # 4. Render in Streamlit
                     components.html(chart_html, height=620)
 
-
+                   
                 elif "Regression" in res['algo']:
                     with st.expander("🔍 The 'Weight' Logic"):
                         st.latex(r"y = w_1x_1 + w_2x_2 + ... + b")
