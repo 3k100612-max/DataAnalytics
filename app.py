@@ -364,33 +364,43 @@ if uploaded_file:
                         class_names=res['class_names'], filled=True, rounded=True, precision=2)
                     
                     st.write("🎮 **Interactive Logic Explorer**")
+                    st.caption("🖱️ **Zoom:** Mouse wheel | **Pan:** Click & Drag | **Reset:** Double-click")
                     
-                    # 2. Robust HTML/JS Viewer
-                    # We use json.dumps to safely pass the string to Javascript
+                    # 2. Prepare data safely for Javascript
                     import json
                     dot_json = json.dumps(dot_data)
                     
+                    # 3. The Zoom & Pan HTML/JS Component
                     chart_html = f"""
-                    <div id="graph-container" style="width: 100%; height: 600px; overflow: auto; border: 1px solid #d1d5db; border-radius: 8px; background: white;">
-                        <div id="placeholder" style="text-align: center; padding: 20px; color: #666;">Loading Tree Logic...</div>
-                    </div>
+                    <div id="graph" style="width: 100%; height: 600px; border: 1px solid #d1d5db; border-radius: 8px; background: white; cursor: move;"></div>
                     
-                    <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm/dist/index.min.js" type="javascript/worker"></script>
-                    <script type="module">
-                        import {{ Graphviz }} from "https://cdn.jsdelivr.net/npm/@hpcc-js/wasm/dist/index.js";
-                        try {{
-                            const graphviz = await Graphviz.load();
-                            const dot = {dot_json};
-                            const svg = graphviz.dot(dot);
-                            document.getElementById("placeholder").innerHTML = svg;
-                        }} catch (e) {{
-                            document.getElementById("placeholder").innerHTML = "❌ Error rendering tree: " + e.message;
-                        }}
+                    <!-- Load D3 and Graphviz Libraries -->
+                    <script src="https://d3js.org/d3.v5.min.js"></script>
+                    <script src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
+                    <script src="https://unpkg.com/d3-graphviz@3.0.5/build/d3-graphviz.js"></script>
+                    
+                    <script>
+                        const dotData = {dot_json};
+                        
+                        // Initialize the graphviz renderer with zoom enabled
+                        d3.select("#graph")
+                          .graphviz()
+                          .width(window.innerWidth - 20)
+                          .height(600)
+                          .fit(true)          // Fits the tree to the window on start
+                          .zoom(true)         // Enables Zoom & Pan
+                          .renderDot(dotData);
+                          
+                        // Optional: Handle window resizing
+                        window.onresize = function() {{
+                            d3.select("#graph").graphviz().width(window.innerWidth - 20);
+                        }};
                     </script>
                     """
                     
-                    # 3. Render the component
+                    # 4. Render the component in Streamlit
                     components.html(chart_html, height=620)
+
 
                 elif "Regression" in res['algo']:
                     with st.expander("🔍 The 'Weight' Logic"):
