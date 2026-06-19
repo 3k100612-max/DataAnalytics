@@ -18,7 +18,11 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.svm import SVC, SVR
 # --- UPDATED IMPORTS ---
-from sklearn.metrics import r2_score, accuracy_score, confusion_matrix, precision_score, recall_score, f1_score
+from sklearn.metrics import (
+    r2_score, accuracy_score, confusion_matrix, 
+    precision_score, recall_score, f1_score,
+    mean_absolute_error, mean_squared_error
+)
 from sklearn.inspection import permutation_importance
 from sklearn.tree import export_graphviz
 
