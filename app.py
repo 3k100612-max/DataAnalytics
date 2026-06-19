@@ -66,16 +66,14 @@ hide_branding_style = """
     div[data-testid="stFooter"] {display: none !important;}
 
     /* 2. Hide the 'Made with Streamlit' text inside the Menu popover */
-    /* This targets the specific container at the bottom of the menu list */
     ul[data-testid="main-menu-list"] > div:last-child {
         display: none !important;
     }
     
-    /* 3. Optional: Hide the 'About', 'Report a bug', and 'Get Help' 
-       but keep Theme, Print, and Record */
-    ul[data-testid="main-menu-list"] > li:nth-child(1), /* Get Help */
-    ul[data-testid="main-menu-list"] > li:nth-child(2), /* Report a bug */
-    ul[data-testid="main-menu-list"] > li:nth-child(3)  /* About */
+    /* 3. Optional: Hide 'About', 'Report a bug', and 'Get Help' */
+    ul[data-testid="main-menu-list"] > li:nth-child(1), 
+    ul[data-testid="main-menu-list"] > li:nth-child(2), 
+    ul[data-testid="main-menu-list"] > li:nth-child(3)
     {
         display: none !important;
     }
@@ -126,25 +124,19 @@ if uploaded_file:
             target_color = st.selectbox("Color Map by:", df.columns, key="pca_color")
         
             if st.button("Generate PCA Insights") and len(pca_feats) >= 2:
-                # 1. Scaling and Transformation
                 X_pca = StandardScaler().fit_transform(df[pca_feats])
                 pca = PCA(n_components=2)
                 comps = pca.fit_transform(X_pca)
             
-                # 2. Extract Loadings (Feature Influence)
                 loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=pca_feats)
-            
-                # 3. IDENTIFY TOP DRIVERS
                 top_driver_pc1 = loadings['PC1'].abs().idxmax()
                 top_driver_pc2 = loadings['PC2'].abs().idxmax()
             
-                # 4. CREATE DYNAMIC LABELS
                 var_pc1 = pca.explained_variance_ratio_[0] * 100
                 var_pc2 = pca.explained_variance_ratio_[1] * 100
                 label_x = f"PC1 ({var_pc1:.1f}%) — Primary Driver: {top_driver_pc1}"
                 label_y = f"PC2 ({var_pc2:.1f}%) — Primary Driver: {top_driver_pc2}"
             
-                # 5. Generate Main Scatter Plot
                 pdf = pd.DataFrame(comps, columns=['PC1', 'PC2'])
                 pdf[target_color] = df[target_color].values
             
@@ -156,7 +148,6 @@ if uploaded_file:
                 )
                 st.plotly_chart(fig_pca, use_container_width=True)
 
-                # 6. Logic Visualizer (Nested inside the button check)
                 st.write("#### 🧠 PCA Logic Visualizer")
                 l_col1, l_col2 = st.columns(2)
             
@@ -179,12 +170,10 @@ if uploaded_file:
                     )
                     st.plotly_chart(fig_load, use_container_width=True)
 
-                # 7. Narrative Summary
                 st.info(f"""
                 **Insight Summary:**
                 * **PC1** represents **{var_pc1:.1f}%** of the dataset's variance and is most heavily influenced by **{top_driver_pc1}**.
                 * **PC2** represents **{var_pc2:.1f}%** of the variance and is primarily driven by **{top_driver_pc2}**.
-                * If points are grouped by color, it means **{target_color}** is strongly related to these two drivers.
                 """)
 
         with col_b:
@@ -203,10 +192,8 @@ if uploaded_file:
                     strongest = corr_matrix.unstack().sort_values(ascending=False).drop_duplicates()
                     pair = strongest.index[1] 
                     st.success(f"**Insight:** Strongest relationship found between **{pair[0]}** and **{pair[1]}** ({strongest.iloc[1]:.2f}).")
-                else:
-                    st.warning("Not enough numeric columns to find relationships.")
 
-        # --- PATH B: MACHINE LEARNING WORKSHOP ---
+    # --- PATH B: MACHINE LEARNING WORKSHOP ---
     elif mode == "Machine Learning Workshop":
         st.subheader("🤖 Supervised Learning Workshop")
         m_col1, m_col2 = st.columns([1, 2])
@@ -216,14 +203,13 @@ if uploaded_file:
             st.write("### ⚙️ Model Configuration")
             target = st.selectbox("1. Target to Predict (Y):", df.columns)
             
-            # --- NEW SAFETY CHECK ---
             unique_count = df[target].nunique()
             is_numeric_target = pd.api.types.is_numeric_dtype(df[target])
             
             task = st.radio("2. Task Type:", ["Classification (Group)", "Regression (Value)"])
             
             if task == "Classification (Group)" and unique_count > 20:
-                st.warning(f"⚠️ **High Complexity:** '{target}' has {unique_count} unique categories. Classification works best with < 20 groups. Consider using Regression or a different column.")
+                st.warning(f"⚠️ **High Complexity:** '{target}' has {unique_count} unique categories. Consider using Regression.")
 
             available_predictors = [col for col in num_cols if col != target]
             
@@ -234,8 +220,26 @@ if uploaded_file:
                     st.caption(f"💡 Best Clue: **{available_predictors[0]}**")
 
             features = st.multiselect("3. Select Clues (X):", options=available_predictors)
-            algo = st.selectbox("4. Algorithm:", ["Linear/Logistic Regression", "Decision Tree", "Naive Bayes", "KNN", "SVM"])
+
+            # --- DYNAMIC VISUALIZER (NEW) ---
+            if features:
+                with st.expander("📊 Bell Curve Check (Clue Distribution)"):
+                    st.caption("Naive Bayes works best when these histograms look like a 'Bell'.")
+                    selected_feat = st.selectbox("Select Clue to Inspect:", features)
+                    fig_dist = px.histogram(df, x=selected_feat, color=target, marginal="box", 
+                                            title=f"Distribution of {selected_feat}", barmode="overlay", template="plotly_white")
+                    st.plotly_chart(fig_dist, use_container_width=True)
+
+            # --- FILTERED ALGORITHM LIST (NEW) ---
+            algo_options = ["Linear/Logistic Regression", "Decision Tree", "Naive Bayes", "KNN", "SVM"]
+            if task == "Regression (Value)":
+                algo_options.remove("Naive Bayes") # Naive Bayes cannot do regression
             
+            algo = st.selectbox("4. Algorithm:", algo_options)
+            
+            if algo == "Naive Bayes":
+                st.warning("⚠️ **Gaussian Assumption:** Naive Bayes assumes your clues follow a Bell Curve. If data is skewed, accuracy will be low.")
+
             depth = 5
             if "Decision Tree" in algo:
                 depth = st.number_input("Select Max Tree Depth:", 1, 10, 5)
@@ -281,24 +285,16 @@ if uploaded_file:
                 if "Classification" in res['task']:
                     acc = accuracy_score(res['y_test'], res['preds'])
                     cm = confusion_matrix(res['y_test'], res['preds'].astype(int))
-                    
                     fig, ax = plt.subplots(figsize=(8, 6))
-                    
-                    # IMPROVED HEATMAP LOGIC
-                    show_labels = len(res['class_names']) < 15 # Hide labels if too many
+                    show_labels = len(res['class_names']) < 15
                     sns.heatmap(cm, annot=show_labels, fmt='d', cmap="Purples", 
                                 xticklabels=res['class_names'] if show_labels else False, 
                                 yticklabels=res['class_names'] if show_labels else False, ax=ax)
-                    
                     plt.xticks(rotation=45)
                     ax.set_title(f"Accuracy: {acc:.2%}")
                     st.pyplot(fig)
                     plt.close(fig)
-                    
-                    if not show_labels:
-                        st.info(f"💡 Labels hidden because there are {len(res['class_names'])} categories. Try a simpler target.")
                 else:
-                    # Regression Plot
                     fig_reg = px.scatter(x=res['y_test'], y=res['preds'], 
                                        labels={'x': 'Actual Value', 'y': 'Predicted Value'}, 
                                        title=f"Regression: Actual vs Predicted (R²: {r2_score(res['y_test'], res['preds']):.2f})")
@@ -306,76 +302,40 @@ if uploaded_file:
                                     x1=max(res['y_test']), y1=max(res['y_test']), line=dict(color="Red", dash="dash"))
                     st.plotly_chart(fig_reg, use_container_width=True)
 
-
                 st.divider()
                 st.write(f"### 🧠 {res['algo']} Logic Explainer")
                 
                 if "Decision Tree" in res['algo']:
-                    st.write(f"#### 🌳 Interactive Decision Path (Depth: {res['tree_depth']})")
-                    
-                    # 1. Export the tree to DOT format (Vector Data)
-                    dot_data = export_graphviz(
-                        model, 
-                        out_file=None, 
-                        feature_names=res['features'],
-                        class_names=res['class_names'],
-                        filled=True, 
-                        rounded=True,  
-                        special_characters=True,
-                        precision=2,
-                        leaves_parallel=False # Keeps the layout clean
-                    )
-                    
-                    # 2. Use st.graphviz_chart for an SVG-based, expandable visual
-                    # This allows the user to hover and zoom without losing quality
+                    dot_data = export_graphviz(model, out_file=None, feature_names=res['features'],
+                        class_names=res['class_names'], filled=True, rounded=True, precision=2)
                     st.graphviz_chart(dot_data, use_container_width=True)
-                    
-                    with st.expander("📝 How to read this expanded view"):
-                        st.markdown("""
-                        * **Color Intensity:** Darker colors mean the model is more 'confident' in that group.
-                        * **Gini/Entropy:** A lower number means the group is 'pure' (mostly one category).
-                        * **Samples:** Shows how many rows from your dataset fell into that specific branch.
-                        * **Fullscreen:** Hover over the top-right of the chart and click the arrows to expand.
-                        """)
 
                 elif "Regression" in res['algo']:
-                    with st.expander("🔍 The 'Weight' Logic (Formula)"):
-                        st.write("Regression treats data like a scale. It assigns a **Weight ($w$)** to every clue to calculate the result.")
+                    with st.expander("🔍 The 'Weight' Logic"):
                         st.latex(r"y = w_1x_1 + w_2x_2 + ... + b")
-                        st.info("Check the **Predictor Influence** chart below to see which clues have the heaviest weights!")
 
                 elif "KNN" in res['algo']:
-                    with st.expander("🔍 The 'Neighbor' Logic (Analogy)"):
-                        st.write("### 👥 'Show me who your friends are...'")
-                        st.write("**K-Nearest Neighbors** doesn't learn rules. Instead, it memorizes the entire dataset.")
-                        st.write("To make a prediction, it looks for the **K** (e.g., 5) most similar rows in the past data and averages their results.")
-                        st.success("It's like asking your 5 closest neighbors for advice before making a choice.")
+                    with st.expander("🔍 The 'Neighbor' Logic"):
+                        st.write("Looks for the **K** most similar rows and averages their results.")
 
                 elif "Naive Bayes" in res['algo']:
-                    with st.expander("🔍 The 'Probability' Logic (Math)"):
-                        st.write("### 📊 The 'Odds' Calculator")
-                        st.write("**Naive Bayes** calculates the probability of each category based on the clues provided.")
-                        st.latex(r"P(Category | Clues) = \frac{P(Clues | Category) \times P(Category)}{P(Clues)}")
-                        st.write("It is called **'Naive'** because it assumes every clue is 100% independent of the others.")
+                    with st.expander("🔍 The 'Probability' Logic"):
+                        st.latex(r"P(C | Clues) = \frac{P(Clues | C) \times P(C)}{P(Clues)}")
 
                 elif "SVM" in res['algo']:
-                    with st.expander("🔍 The 'Boundary' Logic (Visual)"):
-                        st.write("### 🚧 The Great Divide")
-                        st.write("**Support Vector Machines** try to find the best boundary (hyperplane) that separates different groups.")
-                        st.write("It looks for the 'Support Vectors'—the data points closest to the edge—and builds a wall to separate them.")
+                    with st.expander("🔍 The 'Boundary' Logic"):
+                        st.write("Finds the best boundary (hyperplane) that separates different groups.")
                 
                 st.divider()
                 st.write("### 📊 Predictor Influence")
                 importance_data = None
-                
                 if hasattr(model, 'feature_importances_'): 
                     importance_data = model.feature_importances_
                 elif hasattr(model, 'coef_'): 
                     importance_data = np.abs(model.coef_).mean(axis=0) if len(model.coef_.shape) > 1 else np.abs(model.coef_)
                 else:
-                    with st.spinner("Calculating Influence..."):
-                        perm = permutation_importance(model, res['X_test_scaled'], res['y_test'], n_repeats=5, random_state=42)
-                        importance_data = perm.importances_mean
+                    perm = permutation_importance(model, res['X_test_scaled'], res['y_test'], n_repeats=5, random_state=42)
+                    importance_data = perm.importances_mean
 
                 if importance_data is not None:
                     imp_df = pd.DataFrame({'Feature': res['features'], 'Value': importance_data}).sort_values(by='Value')
