@@ -321,13 +321,35 @@ if uploaded_file:
                     plt.close(fig)
                 
                 else:
-                    # Regression Results
+                    # 1. Calculate Regression Metrics
+                    r2 = r2_score(res['y_test'], res['preds'])
+                    mae = mean_absolute_error(res['y_test'], res['preds'])
+                    mse = mean_squared_error(res['y_test'], res['preds'])
+                    rmse = np.sqrt(mse)
+
+                    # 2. Display Metrics in a 4-column row
+                    reg_met1, reg_met2, reg_met3, reg_met4 = st.columns(4)
+                    reg_met1.metric("R² Score", f"{r2:.2f}")
+                    reg_met2.metric("MAE", f"{mae:.2f}")
+                    reg_met3.metric("MSE", f"{mse:.2f}")
+                    reg_met4.metric("RMSE", f"{rmse:.2f}")
+
+                    with st.expander("📖 What do these regression scores mean?"):
+                        st.markdown("""
+                        * **R² Score:** How well the model fits the data (1.0 is perfect).
+                        * **MAE (Mean Absolute Error):** The average 'distance' your prediction is from the truth.
+                        * **MSE (Mean Squared Error):** Similar to MAE, but punishes large errors more heavily.
+                        * **RMSE (Root Mean Squared Error):** The standard deviation of the residuals (errors).
+                        """)
+
+                    # 3. Regression Plot
                     fig_reg = px.scatter(x=res['y_test'], y=res['preds'], 
                                        labels={'x': 'Actual Value', 'y': 'Predicted Value'}, 
-                                       title=f"Regression: Actual vs Predicted (R²: {r2_score(res['y_test'], res['preds']):.2f})")
+                                       title=f"Actual vs Predicted Comparison")
                     fig_reg.add_shape(type="line", x0=min(res['y_test']), y0=min(res['y_test']), 
                                     x1=max(res['y_test']), y1=max(res['y_test']), line=dict(color="Red", dash="dash"))
                     st.plotly_chart(fig_reg, use_container_width=True)
+
 
                 st.divider()
                 st.write(f"### 🧠 {res['algo']} Logic Explainer")
