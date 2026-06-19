@@ -7,6 +7,7 @@ import plotly.express as px
 import os
 import psutil
 import streamlit.components.v1 as components
+import graphviz
 
 # ML Imports
 from sklearn.preprocessing import StandardScaler, LabelEncoder
