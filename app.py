@@ -385,9 +385,13 @@ if uploaded_file:
                           .renderDot(`{dot_data}`);
                     </script>
                     """
-                
+                    
                     # 3. Display the component with a generous height
                     components.html(zoomable_tree_html, height=650)
+                
+                    # 4. Optional: Add a slider to "physically" enlarge the viewer height if needed
+                    st.info("💡 **Presentation Tip:** If the tree is very deep, you can download the SVG below to view it in full-screen.")
+
       
                 elif "Regression" in res['algo']:
                     with st.expander("🔍 The 'Weight' Logic"):
