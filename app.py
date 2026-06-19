@@ -17,7 +17,8 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor, plot_tre
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.svm import SVC, SVR
-from sklearn.metrics import r2_score, accuracy_score, confusion_matrix
+# --- UPDATED IMPORTS ---
+from sklearn.metrics import r2_score, accuracy_score, confusion_matrix, precision_score, recall_score, f1_score
 from sklearn.inspection import permutation_importance
 from sklearn.tree import export_graphviz
 
@@ -224,7 +225,7 @@ if uploaded_file:
             # --- UNIVERSAL DISTRIBUTION VISUALIZER ---
             if features:
                 with st.expander("📊 Clue Distribution Analysis"):
-                    st.info("💡 **Why check this?**\n* **Linear Models & Naive Bayes:** Love bell curves.\n* **KNN & SVM:** Hate outliers (lone dots on the edges).\n* **Trees:** Don't care about the shape, but seeing overlaps helps!")
+                    st.info("💡 **Why check this?**\n* **Linear Models & Naive Bayes:** Love bell curves.\n* **KNN & SVM:** Hate outliers.\n* **Trees:** Don't care about the shape, but seeing overlaps helps!")
                     selected_feat = st.selectbox("Select Clue to Inspect:", features)
                     fig_dist = px.histogram(df, x=selected_feat, color=target, marginal="box", 
                                             title=f"Distribution of {selected_feat} by {target}", 
@@ -282,8 +283,32 @@ if uploaded_file:
                 model = res['model']
                 
                 st.write(f"### 🎯 Results for {res['target']}")
+                
+                # --- UPDATED CLASSIFICATION RESULTS SECTION ---
                 if "Classification" in res['task']:
+                    # 1. Calculate Metrics
                     acc = accuracy_score(res['y_test'], res['preds'])
+                    prec = precision_score(res['y_test'], res['preds'], average='weighted', zero_division=0)
+                    rec = recall_score(res['y_test'], res['preds'], average='weighted', zero_division=0)
+                    f1 = f1_score(res['y_test'], res['preds'], average='weighted', zero_division=0)
+                    
+                    # 2. Display Metrics Row
+                    met1, met2, met3, met4 = st.columns(4)
+                    met1.metric("Accuracy", f"{acc:.2%}")
+                    met2.metric("Precision", f"{prec:.2%}")
+                    met3.metric("Recall", f"{rec:.2%}")
+                    met4.metric("F1-Score", f"{f1:.2%}")
+
+                    # 3. Explainer Expander
+                    with st.expander("📖 What do these scores mean?"):
+                        st.markdown("""
+                        * **Accuracy:** Overall correctness.
+                        * **Precision:** Quality of 'Positive' guesses (Low precision = many false alarms).
+                        * **Recall:** Ability to find all 'Positive' cases (Low recall = many missed cases).
+                        * **F1-Score:** The 'Harmonic Mean' of Precision and Recall. Best for imbalanced data.
+                        """)
+
+                    # 4. Confusion Matrix
                     cm = confusion_matrix(res['y_test'], res['preds'].astype(int))
                     fig, ax = plt.subplots(figsize=(8, 6))
                     show_labels = len(res['class_names']) < 15
@@ -291,10 +316,12 @@ if uploaded_file:
                                 xticklabels=res['class_names'] if show_labels else False, 
                                 yticklabels=res['class_names'] if show_labels else False, ax=ax)
                     plt.xticks(rotation=45)
-                    ax.set_title(f"Accuracy: {acc:.2%}")
+                    ax.set_title("Confusion Matrix: Where did the model get confused?")
                     st.pyplot(fig)
                     plt.close(fig)
+                
                 else:
+                    # Regression Results
                     fig_reg = px.scatter(x=res['y_test'], y=res['preds'], 
                                        labels={'x': 'Actual Value', 'y': 'Predicted Value'}, 
                                        title=f"Regression: Actual vs Predicted (R²: {r2_score(res['y_test'], res['preds']):.2f})")
