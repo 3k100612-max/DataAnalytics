@@ -221,19 +221,19 @@ if uploaded_file:
 
             features = st.multiselect("3. Select Clues (X):", options=available_predictors)
 
-            # --- DYNAMIC VISUALIZER (NEW) ---
+            # --- UNIVERSAL DISTRIBUTION VISUALIZER ---
             if features:
-                with st.expander("📊 Bell Curve Check (Clue Distribution)"):
-                    st.caption("Naive Bayes works best when these histograms look like a 'Bell'.")
+                with st.expander("📊 Clue Distribution Analysis"):
+                    st.info("💡 **Why check this?**\n* **Linear Models & Naive Bayes:** Love bell curves.\n* **KNN & SVM:** Hate outliers (lone dots on the edges).\n* **Trees:** Don't care about the shape, but seeing overlaps helps!")
                     selected_feat = st.selectbox("Select Clue to Inspect:", features)
                     fig_dist = px.histogram(df, x=selected_feat, color=target, marginal="box", 
-                                            title=f"Distribution of {selected_feat}", barmode="overlay", template="plotly_white")
+                                            title=f"Distribution of {selected_feat} by {target}", 
+                                            barmode="overlay", template="plotly_white")
                     st.plotly_chart(fig_dist, use_container_width=True)
 
-            # --- FILTERED ALGORITHM LIST (NEW) ---
             algo_options = ["Linear/Logistic Regression", "Decision Tree", "Naive Bayes", "KNN", "SVM"]
             if task == "Regression (Value)":
-                algo_options.remove("Naive Bayes") # Naive Bayes cannot do regression
+                algo_options.remove("Naive Bayes")
             
             algo = st.selectbox("4. Algorithm:", algo_options)
             
