@@ -359,10 +359,34 @@ if uploaded_file:
                 st.write(f"### 🧠 {res['algo']} Logic Explainer")
                 
                 if "Decision Tree" in res['algo']:
+                    # 1. Generate the dot data
                     dot_data = export_graphviz(model, out_file=None, feature_names=res['features'],
                         class_names=res['class_names'], filled=True, rounded=True, precision=2)
-                    st.graphviz_chart(dot_data, use_container_width=True)
-
+                    
+                    # 2. Create a scrollable container for the graph
+                    # This allows you to scroll horizontally and vertically to see the logic
+                    st.write("🔍 **Tip:** Use the scrollbars below to explore the tree logic.")
+                    
+                    # Wrap the chart in a div with overflow enabled
+                    graph_html = f"""
+                    <div style="overflow-x: auto; overflow-y: auto; width: 100%; border: 1px solid #e6e9ef; border-radius: 8px; padding: 10px; background: white;">
+                        <div style="min-width: 1200px;">
+                            {graphviz.Source(dot_data)._repr_image_svg_xml()}
+                        </div>
+                    </div>
+                    """
+                    components.html(graph_html, height=600, scrolling=True)
+                
+                    # 3. Add a Download Button for a high-res Vector (SVG)
+                    # This is the "Gold Standard" for presentations - open this in a browser tab to zoom 1000%
+                    st.download_button(
+                        label="📥 Download High-Res Tree (SVG for Zooming)",
+                        data=dot_data,
+                        file_name="decision_tree_logic.dot",
+                        mime="text/plain",
+                        help="Open this file in a browser or Graphviz viewer for infinite zoom."
+                    )
+                    
                 elif "Regression" in res['algo']:
                     with st.expander("🔍 The 'Weight' Logic"):
                         st.latex(r"y = w_1x_1 + w_2x_2 + ... + b")
