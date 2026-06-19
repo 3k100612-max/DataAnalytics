@@ -358,39 +358,39 @@ if uploaded_file:
                 st.divider()
                 st.write(f"### 🧠 {res['algo']} Logic Explainer")
                 
-               if "Decision Tree" in res['algo']:
-                    # 1. Generate the raw DOT data (Sklearn)
-                    dot_data = export_graphviz(model, out_file=None, feature_names=res['features'],
-                        class_names=res['class_names'], filled=True, rounded=True, precision=2)
-                    
-                    st.write("🎮 **Interactive Logic Explorer**")
-                    st.caption("Use your mouse wheel to zoom, click and drag to move, and double-click to reset.")
-                
+              if "Decision Tree" in res['algo']:
+                  # 1. Generate the raw DOT data (Sklearn)
+                  dot_data = export_graphviz(model, out_file=None, feature_names=res['features'],
+                     class_names=res['class_names'], filled=True, rounded=True, precision=2)
+    
+                  st.write("🎮 **Interactive Logic Explorer**")
+                  st.caption("Use your mouse wheel to zoom, click and drag to move, and double-click to reset.")
+
                     # 2. The Pro Zoom Viewer (HTML/JS)
                     # This uses d3-graphviz for smooth zooming and panning
-                    zoomable_tree_html = f"""
-                    <script src="https://d3js.org/d3.v5.min.js"></script>
-                    <script src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
-                    <script src="https://unpkg.com/d3-graphviz@3.0.5/build/d3-graphviz.js"></script>
-                
-                    <div id="graph" style="text-align: center; border: 1px solid #d1d5db; border-radius: 8px; background: white; cursor: move;"></div>
-                
-                    <script>
-                        // We use d3-graphviz to render the DOT data with built-in zoom/pan
-                        d3.select("#graph")
-                          .graphviz()
-                          .width(window.innerWidth - 40)
-                          .height(600)
-                          .fit(true)
-                          .renderDot(`{dot_data}`);
-                    </script>
-                    """
+                  zoomable_tree_html = f"""
+                <script src="https://d3js.org/d3.v5.min.js"></script>
+                <script src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
+                <script src="https://unpkg.com/d3-graphviz@3.0.5/build/d3-graphviz.js"></script>
+            
+                <div id="graph" style="text-align: center; border: 1px solid #d1d5db; border-radius: 8px; background: white; cursor: move;"></div>
+            
+                <script>
+                    // We use d3-graphviz to render the DOT data with built-in zoom/pan
+                    d3.select("#graph")
+                      .graphviz()
+                      .width(window.innerWidth - 40)
+                      .height(600)
+                      .fit(true)
+                      .renderDot(`{dot_data}`);
+                </script>
+                """
                     
-                    # 3. Display the component with a generous height
-                    components.html(zoomable_tree_html, height=650)
-                
-                    # 4. Optional: Add a slider to "physically" enlarge the viewer height if needed
-                    st.info("💡 **Presentation Tip:** If the tree is very deep, you can download the SVG below to view it in full-screen.")
+                # 3. Display the component with a generous height
+                components.html(zoomable_tree_html, height=650)
+            
+                # 4. Optional: Add a slider to "physically" enlarge the viewer height if needed
+                st.info("💡 **Presentation Tip:** If the tree is very deep, you can download the SVG below to view it in full-screen.")
 
 
                     
