@@ -7,7 +7,6 @@ import plotly.express as px
 import os
 import psutil
 import streamlit.components.v1 as components
-import graphviz
 
 # ML Imports
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -360,33 +359,37 @@ if uploaded_file:
                 st.write(f"### 🧠 {res['algo']} Logic Explainer")
                 
                 if "Decision Tree" in res['algo']:
-                    # 1. Generate the dot data
+                    # 1. Generate the raw DOT data (this uses sklearn, which you already have)
                     dot_data = export_graphviz(model, out_file=None, feature_names=res['features'],
                         class_names=res['class_names'], filled=True, rounded=True, precision=2)
                     
-                    # 2. Create a scrollable container for the graph
-                    # This allows you to scroll horizontally and vertically to see the logic
-                    st.write("🔍 **Tip:** Use the scrollbars below to explore the tree logic.")
-                    
-                    # Wrap the chart in a div with overflow enabled
-                    graph_html = f"""
-                    <div style="overflow-x: auto; overflow-y: auto; width: 100%; border: 1px solid #e6e9ef; border-radius: 8px; padding: 10px; background: white;">
-                        <div style="min-width: 1200px;">
-                            {graphviz.Source(dot_data)._repr_image_svg_xml()}
-                        </div>
-                    </div>
-                    """
-                    components.html(graph_html, height=600, scrolling=True)
+                    st.write("🔍 **Interactive Logic Map** (Scroll to explore, use browser zoom to see details)")
                 
-                    # 3. Add a Download Button for a high-res Vector (SVG)
-                    # This is the "Gold Standard" for presentations - open this in a browser tab to zoom 1000%
+                    # 2. The "No-Library" HTML/JS Viewer
+                    # This renders the tree in the browser so you don't need the python graphviz module
+                    chart_html = f"""
+                    <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm/dist/index.min.js" type="javascript/worker"></script>
+                    <div id="placeholder" style="width: 100%; height: 600px; overflow: auto; border: 1px solid #d1d5db; border-radius: 8px; background: white;"></div>
+                    <script type="module">
+                        import {{ Graphviz }} from "https://cdn.jsdelivr.net/npm/@hpcc-js/wasm/dist/index.js";
+                        const graphviz = await Graphviz.load();
+                        const dot = `{dot_data}`;
+                        const svg = graphviz.dot(dot);
+                        document.getElementById("placeholder").innerHTML = svg;
+                    </script>
+                    """
+                    
+                    # 3. Display the interactive component
+                    components.html(chart_html, height=620)
+                
+                    # 4. Keep the download button for your documentation
                     st.download_button(
-                        label="📥 Download High-Res Tree (SVG for Zooming)",
+                        label="📥 Download Tree Logic (DOT File)",
                         data=dot_data,
-                        file_name="decision_tree_logic.dot",
-                        mime="text/plain",
-                        help="Open this file in a browser or Graphviz viewer for infinite zoom."
+                        file_name="decision_tree.dot",
+                        mime="text/plain"
                     )
+
                     
                 elif "Regression" in res['algo']:
                     with st.expander("🔍 The 'Weight' Logic"):
