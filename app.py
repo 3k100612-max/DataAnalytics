@@ -1,459 +1,557 @@
-import streamlit as st
-import pandas as pd
+import os
+import json
+import psutil
 import numpy as np
+import pandas as pd
+import streamlit as st
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
-import os
-import psutil
-import streamlit.components.v1 as components
 
-# ML Imports
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.decomposition import PCA
-from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor, plot_tree
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
-from sklearn.svm import SVC, SVR
-# --- UPDATED IMPORTS ---
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import train_test_split, StratifiedKFold, KFold, cross_validate
+from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.ensemble import (
+    RandomForestClassifier, ExtraTreesClassifier, GradientBoostingClassifier,
+    RandomForestRegressor, ExtraTreesRegressor, GradientBoostingRegressor
+)
 from sklearn.metrics import (
-    r2_score, accuracy_score, confusion_matrix, 
-    precision_score, recall_score, f1_score,
+    accuracy_score, balanced_accuracy_score, precision_score, recall_score,
+    f1_score, confusion_matrix, classification_report, r2_score,
     mean_absolute_error, mean_squared_error
 )
 from sklearn.inspection import permutation_importance
-from sklearn.tree import export_graphviz
 
-# --- 1. SYSTEM & RAM MONITORING ---
-def get_vps_ram():
-    try:
-        return psutil.Process(os.getpid()).memory_info().rss / (1024**2)
-    except: 
-        return 0
+# -----------------------------
+# Page configuration
+# -----------------------------
+st.set_page_config(
+    page_title="Machine Learning Intuition Lab",
+    page_icon="🧪",
+    layout="wide"
+)
 
-browser_ram_js = """
-<div id="browser-mem" style="font-family: sans-serif; color: #808495; font-size: 0.8rem;">Detecting Browser RAM...</div>
-<script>
-    function updateRam() {
-        const mem = window.performance.memory;
-        if (mem) {
-            const used = (mem.usedJSHeapSize / (1024 * 1024)).toFixed(1);
-            const total = (mem.jsHeapSizeLimit / (1024 * 1024)).toFixed(1);
-            document.getElementById('browser-mem').innerHTML = "🌐 Browser Tab: " + used + "MB / " + total + "MB";
-        }
-    }
-    setInterval(updateRam, 2000); updateRam();
-</script>
-"""
-
-# --- 2. DATA ENGINE ---
-@st.cache_data
-def load_and_fix(file, rows):
-    df = pd.read_csv(file, nrows=rows, low_memory=False)
-    total_missing = df.isnull().sum().sum()
-    for col in df.columns:
-        if df[col].dtype == 'float64': df[col] = df[col].astype('float32')
-        if df[col].dtype == 'int64': df[col] = df[col].astype('int32')
-    df = df.fillna(df.median(numeric_only=True))
-    for col in df.select_dtypes(exclude=[np.number]).columns:
-        df[col] = df[col].fillna(df[col].mode()[0] if not df[col].mode().empty else "Unknown")
-    return df, total_missing
-
-# --- 3. UI CONFIGURATION ---
-st.set_page_config(page_title="Machine Learning Intuition Lab", layout="wide", page_icon="🧪",menu_items={'About': " Machine Learning Intuition Lab A Project in Fullfillment with the Requirement of MSIT643 Submitted by Timothy Mark A. Bal-e"})
 st.title("🧪 Machine Learning Intuition Lab")
-hide_branding_style = """
-    <style>
-    /* 1. Hide the footer at the very bottom of the page */
-    footer {display: none !important;}
-    div[data-testid="stFooter"] {display: none !important;}
+st.caption("Automatic preprocessing, stratified 80/20 splitting, cross-validation, and model comparison")
 
-    /* 2. Hide the 'Made with Streamlit' text inside the Menu popover */
-    ul[data-testid="main-menu-list"] > div:last-child {
-        display: none !important;
+# -----------------------------
+# Utility functions
+# -----------------------------
+def get_process_ram_mb():
+    try:
+        return psutil.Process(os.getpid()).memory_info().rss / (1024 ** 2)
+    except Exception:
+        return 0.0
+
+
+def make_one_hot_encoder():
+    """Support both newer and older scikit-learn versions."""
+    try:
+        return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    except TypeError:
+        return OneHotEncoder(handle_unknown="ignore", sparse=False)
+
+
+@st.cache_data(show_spinner=False)
+def load_and_clean_csv(file, max_rows):
+    df = pd.read_csv(file, nrows=max_rows, low_memory=False)
+    missing_before = int(df.isna().sum().sum())
+
+    # Reduce memory where possible.
+    for col in df.select_dtypes(include=["float64"]).columns:
+        df[col] = pd.to_numeric(df[col], downcast="float")
+    for col in df.select_dtypes(include=["int64"]).columns:
+        df[col] = pd.to_numeric(df[col], downcast="integer")
+
+    return df, missing_before
+
+
+def build_preprocessor(X):
+    numeric_features = X.select_dtypes(include=np.number).columns.tolist()
+    categorical_features = X.select_dtypes(exclude=np.number).columns.tolist()
+
+    numeric_pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler())
+    ])
+
+    categorical_pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="most_frequent")),
+        ("encoder", make_one_hot_encoder())
+    ])
+
+    transformers = []
+    if numeric_features:
+        transformers.append(("numeric", numeric_pipe, numeric_features))
+    if categorical_features:
+        transformers.append(("categorical", categorical_pipe, categorical_features))
+
+    if not transformers:
+        raise ValueError("No usable predictor columns were found.")
+
+    return ColumnTransformer(transformers=transformers, remainder="drop")
+
+
+def classification_models(preprocessor):
+    return {
+        "Logistic Regression": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", LogisticRegression(max_iter=2000, class_weight="balanced"))
+        ]),
+        "Decision Tree": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", DecisionTreeClassifier(
+                max_depth=8, min_samples_leaf=3,
+                class_weight="balanced", random_state=42
+            ))
+        ]),
+        "Random Forest": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", RandomForestClassifier(
+                n_estimators=250, min_samples_leaf=2,
+                class_weight="balanced", random_state=42, n_jobs=-1
+            ))
+        ]),
+        "Extra Trees": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", ExtraTreesClassifier(
+                n_estimators=250, min_samples_leaf=2,
+                class_weight="balanced", random_state=42, n_jobs=-1
+            ))
+        ]),
+        "Gradient Boosting": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", GradientBoostingClassifier(
+                n_estimators=150, learning_rate=0.05,
+                max_depth=3, random_state=42
+            ))
+        ])
     }
-    
-    /* 3. Optional: Hide 'About', 'Report a bug', and 'Get Help' */
-    ul[data-testid="main-menu-list"] > li:nth-child(1), 
-    ul[data-testid="main-menu-list"] > li:nth-child(2), 
-    ul[data-testid="main-menu-list"] > li:nth-child(3)
-    {
-        display: none !important;
+
+
+def regression_models(preprocessor):
+    return {
+        "Linear Regression": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", LinearRegression())
+        ]),
+        "Decision Tree": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", DecisionTreeRegressor(
+                max_depth=8, min_samples_leaf=3, random_state=42
+            ))
+        ]),
+        "Random Forest": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", RandomForestRegressor(
+                n_estimators=250, min_samples_leaf=2,
+                random_state=42, n_jobs=-1
+            ))
+        ]),
+        "Extra Trees": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", ExtraTreesRegressor(
+                n_estimators=250, min_samples_leaf=2,
+                random_state=42, n_jobs=-1
+            ))
+        ]),
+        "Gradient Boosting": Pipeline([
+            ("preprocessor", preprocessor),
+            ("model", GradientBoostingRegressor(
+                n_estimators=150, learning_rate=0.05,
+                max_depth=3, random_state=42
+            ))
+        ])
     }
-    </style>
-    """
-st.markdown(hide_branding_style, unsafe_allow_html=True)
 
-if 'ml_results' not in st.session_state:
-    st.session_state.ml_results = None
 
+def prepare_target(df, target, task):
+    data = df.copy()
+
+    if task == "Classification":
+        data[target] = data[target].astype("string").fillna("Unknown").astype(str)
+        y = data[target]
+        X = data.drop(columns=[target])
+        return X, y
+
+    # For regression, invalid target values cannot be used.
+    data[target] = pd.to_numeric(data[target], errors="coerce")
+    data = data.dropna(subset=[target])
+    y = data[target].astype(float)
+    X = data.drop(columns=[target])
+    return X, y
+
+
+def evaluate_classification(X, y):
+    if y.nunique() < 2:
+        raise ValueError("Classification requires at least two target classes.")
+    if y.value_counts().min() < 2:
+        raise ValueError("Every class needs at least two rows for stratified splitting.")
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.20, random_state=42, stratify=y
+    )
+
+    smallest_class = int(y_train.value_counts().min())
+    if smallest_class >= 5:
+        n_splits = 5
+    elif smallest_class >= 3:
+        n_splits = 3
+    else:
+        n_splits = 2
+
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    models = classification_models(build_preprocessor(X_train))
+    rows = []
+    fitted = {}
+
+    scoring = {
+        "accuracy": "accuracy",
+        "balanced_accuracy": "balanced_accuracy",
+        "precision": "precision_weighted",
+        "recall": "recall_weighted",
+        "f1": "f1_weighted"
+    }
+
+    for name, model in models.items():
+        scores = cross_validate(
+            model, X_train, y_train, cv=cv, scoring=scoring,
+            n_jobs=-1, error_score="raise"
+        )
+        model.fit(X_train, y_train)
+        fitted[name] = model
+        row = {
+            "Algorithm": name,
+            "CV Accuracy": scores["test_accuracy"].mean(),
+            "CV Balanced Accuracy": scores["test_balanced_accuracy"].mean(),
+            "CV Precision": scores["test_precision"].mean(),
+            "CV Recall": scores["test_recall"].mean(),
+            "CV F1": scores["test_f1"].mean()
+        }
+        row["Selection Score"] = 0.5 * row["CV Balanced Accuracy"] + 0.5 * row["CV F1"]
+        rows.append(row)
+
+    leaderboard = pd.DataFrame(rows).sort_values(
+        "Selection Score", ascending=False
+    ).reset_index(drop=True)
+
+    best_name = leaderboard.iloc[0]["Algorithm"]
+    best_model = fitted[best_name]
+    predictions = best_model.predict(X_test)
+
+    metrics = {
+        "Accuracy": accuracy_score(y_test, predictions),
+        "Balanced Accuracy": balanced_accuracy_score(y_test, predictions),
+        "Precision": precision_score(y_test, predictions, average="weighted", zero_division=0),
+        "Recall": recall_score(y_test, predictions, average="weighted", zero_division=0),
+        "F1 Score": f1_score(y_test, predictions, average="weighted", zero_division=0)
+    }
+
+    return {
+        "task": "Classification",
+        "best_name": best_name,
+        "best_model": best_model,
+        "leaderboard": leaderboard,
+        "X_train": X_train,
+        "X_test": X_test,
+        "y_train": y_train,
+        "y_test": y_test,
+        "predictions": predictions,
+        "metrics": metrics,
+        "classes": sorted(y.unique().tolist())
+    }
+
+
+def evaluate_regression(X, y):
+    if len(X) < 10:
+        raise ValueError("Regression requires at least 10 valid rows.")
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.20, random_state=42
+    )
+
+    cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    models = regression_models(build_preprocessor(X_train))
+    rows = []
+    fitted = {}
+
+    scoring = {
+        "r2": "r2",
+        "mae": "neg_mean_absolute_error",
+        "rmse": "neg_root_mean_squared_error"
+    }
+
+    for name, model in models.items():
+        scores = cross_validate(
+            model, X_train, y_train, cv=cv, scoring=scoring,
+            n_jobs=-1, error_score="raise"
+        )
+        model.fit(X_train, y_train)
+        fitted[name] = model
+        rows.append({
+            "Algorithm": name,
+            "CV R²": scores["test_r2"].mean(),
+            "CV MAE": -scores["test_mae"].mean(),
+            "CV RMSE": -scores["test_rmse"].mean()
+        })
+
+    leaderboard = pd.DataFrame(rows).sort_values(
+        "CV R²", ascending=False
+    ).reset_index(drop=True)
+
+    best_name = leaderboard.iloc[0]["Algorithm"]
+    best_model = fitted[best_name]
+    predictions = best_model.predict(X_test)
+
+    metrics = {
+        "R²": r2_score(y_test, predictions),
+        "MAE": mean_absolute_error(y_test, predictions),
+        "RMSE": np.sqrt(mean_squared_error(y_test, predictions))
+    }
+
+    return {
+        "task": "Regression",
+        "best_name": best_name,
+        "best_model": best_model,
+        "leaderboard": leaderboard,
+        "X_train": X_train,
+        "X_test": X_test,
+        "y_train": y_train,
+        "y_test": y_test,
+        "predictions": predictions,
+        "metrics": metrics
+    }
+
+
+def show_model_results(result):
+    task = result["task"]
+    st.subheader(f"Best algorithm: {result['best_name']}")
+
+    if task == "Classification":
+        st.info(
+            "The model was selected using cross-validation on the training set. "
+            "The final metrics below come from the untouched 20% test set."
+        )
+    else:
+        st.info(
+            "Regression does not use classification accuracy. R², MAE, and RMSE "
+            "measure how close the numeric predictions are to the real values."
+        )
+
+    st.write("### Algorithm comparison")
+    leaderboard = result["leaderboard"].copy()
+    format_cols = [c for c in leaderboard.columns if c != "Algorithm"]
+    st.dataframe(
+        leaderboard.style.format({c: "{:.3f}" for c in format_cols}),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.write("### Final 20% test-set performance")
+    metric_cols = st.columns(len(result["metrics"]))
+    for col, (name, value) in zip(metric_cols, result["metrics"].items()):
+        if task == "Classification":
+            col.metric(name, f"{value:.2%}")
+        else:
+            col.metric(name, f"{value:.4f}")
+
+    if task == "Classification":
+        score = result["metrics"]["Balanced Accuracy"]
+        if score >= 0.95:
+            st.success("Excellent test performance. Still check for leakage and validate on future data.")
+        elif score >= 0.90:
+            st.success("Strong test performance, but it is not a guarantee for future data.")
+        elif score >= 0.70:
+            st.warning("Moderate performance. More informative predictors or better labels may be needed.")
+        else:
+            st.error("Low performance. The available predictors may not contain enough signal.")
+
+        cm = confusion_matrix(result["y_test"], result["predictions"], labels=result["classes"])
+        fig, ax = plt.subplots(figsize=(8, 6))
+        show_labels = len(result["classes"]) <= 20
+        sns.heatmap(
+            cm, annot=show_labels, fmt="d", cmap="Purples", ax=ax,
+            xticklabels=result["classes"] if show_labels else False,
+            yticklabels=result["classes"] if show_labels else False
+        )
+        ax.set_xlabel("Predicted label")
+        ax.set_ylabel("True label")
+        ax.set_title("Confusion Matrix")
+        st.pyplot(fig)
+        plt.close(fig)
+
+        with st.expander("Classification report"):
+            report = classification_report(
+                result["y_test"], result["predictions"], zero_division=0
+            )
+            st.code(report)
+
+    else:
+        score = result["metrics"]["R²"]
+        if score >= 0.90:
+            st.success("The model explains at least 90% of test-set target variation.")
+        elif score >= 0.70:
+            st.warning("The model has moderate explanatory power.")
+        else:
+            st.error("The model explains less than 70% of the test-set variation.")
+
+        actual = result["y_test"]
+        predicted = result["predictions"]
+        fig = px.scatter(
+            x=actual, y=predicted,
+            labels={"x": "Actual value", "y": "Predicted value"},
+            title="Actual versus Predicted Values"
+        )
+        low = min(actual.min(), predicted.min())
+        high = max(actual.max(), predicted.max())
+        fig.add_shape(
+            type="line", x0=low, y0=low, x1=high, y1=high,
+            line=dict(color="red", dash="dash")
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Permutation importance is calculated on the untouched test set.
+    st.write("### Predictor influence")
+    try:
+        scoring = "balanced_accuracy" if task == "Classification" else "r2"
+        perm = permutation_importance(
+            result["best_model"], result["X_test"], result["y_test"],
+            n_repeats=5, random_state=42, scoring=scoring, n_jobs=-1
+        )
+        imp_df = pd.DataFrame({
+            "Feature": result["X_test"].columns,
+            "Importance": perm.importances_mean
+        }).sort_values("Importance", ascending=True)
+        fig_imp = px.bar(
+            imp_df, x="Importance", y="Feature", orientation="h",
+            title="Permutation Importance on Test Data",
+            color="Importance", color_continuous_scale="Portland"
+        )
+        st.plotly_chart(fig_imp, use_container_width=True)
+    except Exception as exc:
+        st.warning(f"Feature importance could not be calculated: {exc}")
+
+
+# -----------------------------
+# Sidebar and upload
+# -----------------------------
 with st.sidebar:
-    st.header("🖥️ System Status")
-    vps_mem = get_vps_ram()
-    st.write(f"💾 VPS RAM: {vps_mem:.1f}MB / 8192MB")
-    st.progress(min(vps_mem/8192, 1.0))
-    components.html(browser_ram_js, height=50)
-    st.markdown("---")
-    row_limit = st.sidebar.slider("Max Rows to Load", 1000, 1000000, 500000)
+    st.header("System status")
+    ram = get_process_ram_mb()
+    st.write(f"Python process RAM: {ram:.1f} MB")
+    max_rows = st.slider("Maximum rows to load", 1_000, 1_000_000, 500_000, step=1_000)
+    st.caption("The test set is never artificially balanced. Class weighting is applied only inside training models.")
 
-# --- STEP 1: DATA UPLOAD ---
-uploaded_file = st.file_uploader("1. Upload CSV Dataset", type="csv")
+uploaded_file = st.file_uploader("Upload a CSV dataset", type=["csv"])
 
-if uploaded_file:
-    df, total_missing = load_and_fix(uploaded_file, row_limit)
-    st.success(f"✅ Data Health Check: {total_missing} missing values fixed automatically.")
-    
-    csv_data = df.to_csv(index=False).encode('utf-8')
-    st.download_button(label="📥 Download Fixed Dataset (CSV)", data=csv_data, file_name="cleaned_data.csv")
-    st.divider()
+if uploaded_file is None:
+    st.info("Upload a CSV file to begin.")
+    st.stop()
 
-    mode = st.radio("Select Active Workspace:", 
-                    ["None", "Exploratory Analysis (PCA & Heatmap)", "Machine Learning Workshop"], 
-                    horizontal=True)
+try:
+    df, missing_before = load_and_clean_csv(uploaded_file, max_rows)
+except Exception as exc:
+    st.error(f"Could not read the CSV file: {exc}")
+    st.stop()
 
-    # --- PATH A: EXPLORATORY ANALYSIS ---
-    if mode == "Exploratory Analysis (PCA & Heatmap)":
-        num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        st.info("💡 Exploratory Analysis simplifies data and finds hidden relationships before training starts.")
-        
-        col_a, col_b = st.columns(2)
-        
-        with col_a:
-            st.write("### 💎 PCA (Dimensionality Reduction)")
-            with st.expander("📖 The Shadow Analogy (Explainer)"):
-                st.write("Imagine holding a 3D teapot in front of a flashlight. The shadow on the wall is 2D. **PCA** finds the best angle to hold the teapot so the shadow captures the most detail.")
-        
-            pca_feats = st.multiselect("Select Numeric Columns to Compress:", num_cols, default=num_cols[:min(3, len(num_cols))])
-            target_color = st.selectbox("Color Map by:", df.columns, key="pca_color")
-        
-            if st.button("Generate PCA Insights") and len(pca_feats) >= 2:
-                X_pca = StandardScaler().fit_transform(df[pca_feats])
-                pca = PCA(n_components=2)
-                comps = pca.fit_transform(X_pca)
-            
-                loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=pca_feats)
-                top_driver_pc1 = loadings['PC1'].abs().idxmax()
-                top_driver_pc2 = loadings['PC2'].abs().idxmax()
-            
-                var_pc1 = pca.explained_variance_ratio_[0] * 100
-                var_pc2 = pca.explained_variance_ratio_[1] * 100
-                label_x = f"PC1 ({var_pc1:.1f}%) — Primary Driver: {top_driver_pc1}"
-                label_y = f"PC2 ({var_pc2:.1f}%) — Primary Driver: {top_driver_pc2}"
-            
-                pdf = pd.DataFrame(comps, columns=['PC1', 'PC2'])
-                pdf[target_color] = df[target_color].values
-            
-                fig_pca = px.scatter(
-                    pdf, x='PC1', y='PC2', color=target_color, 
-                    title=f"PCA: {target_color} Distribution",
-                    labels={'PC1': label_x, 'PC2': label_y},
-                    template="plotly_white"
-                )
-                st.plotly_chart(fig_pca, use_container_width=True)
+if df.empty:
+    st.error("The CSV file contains no rows.")
+    st.stop()
 
-                st.write("#### 🧠 PCA Logic Visualizer")
-                l_col1, l_col2 = st.columns(2)
-            
-                with l_col1:
-                    fig_var = px.bar(
-                        x=['PC1', 'PC2'], 
-                        y=pca.explained_variance_ratio_, 
-                        title="Information Retention", 
-                        labels={'y':'% Info Retained', 'x': 'Component'},
-                        color_discrete_sequence=['#636EFA']
-                    )
-                    st.plotly_chart(fig_var, use_container_width=True)
-                    
-                with l_col2:
-                    fig_load = px.bar(
-                        loadings, 
-                        barmode='group', 
-                        title="Feature Influence (Loadings)",
-                        labels={'index': 'Features', 'value': 'Weight'}
-                    )
-                    st.plotly_chart(fig_load, use_container_width=True)
+st.success(f"Loaded {len(df):,} rows and {len(df.columns):,} columns.")
+st.write(f"Missing values detected: **{missing_before:,}**. Missing values are imputed inside each model pipeline.")
 
-                st.info(f"""
-                **Insight Summary:**
-                * **PC1** represents **{var_pc1:.1f}%** of the dataset's variance and is most heavily influenced by **{top_driver_pc1}**.
-                * **PC2** represents **{var_pc2:.1f}%** of the variance and is primarily driven by **{top_driver_pc2}**.
-                """)
+st.download_button(
+    "Download the uploaded data",
+    data=df.to_csv(index=False).encode("utf-8"),
+    file_name="uploaded_dataset.csv",
+    mime="text/csv"
+)
 
-        with col_b:
-            st.write("### 🌡️ Relationship Heatmap")
-            with st.expander("📖 The Dance Analogy (Explainer)"):
-                st.write("Correlation measures if variables 'dance' together. **+1.0 (Blue)** means they move in sync; **-1.0 (Red)** means they move in opposite directions.")
-            
-            if st.button("Generate Relationship Heatmap"):
-                fig, ax = plt.subplots(figsize=(10, 8))
-                corr_matrix = df[num_cols].corr()
-                sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="RdBu", ax=ax, center=0)
-                st.pyplot(fig)
-                plt.close(fig)
-                
-                if len(num_cols) > 1:
-                    strongest = corr_matrix.unstack().sort_values(ascending=False).drop_duplicates()
-                    pair = strongest.index[1] 
-                    st.success(f"**Insight:** Strongest relationship found between **{pair[0]}** and **{pair[1]}** ({strongest.iloc[1]:.2f}).")
+with st.expander("Preview dataset"):
+    st.dataframe(df.head(20), use_container_width=True)
 
-    # --- PATH B: MACHINE LEARNING WORKSHOP ---
-    elif mode == "Machine Learning Workshop":
-        st.subheader("🤖 Supervised Learning Workshop")
-        m_col1, m_col2 = st.columns([1, 2])
-        num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+mode = st.radio(
+    "Workspace",
+    ["Automatic Machine Learning", "Exploratory Analysis"],
+    horizontal=True
+)
 
-        with m_col1:
-            st.write("### ⚙️ Model Configuration")
-            target = st.selectbox("1. Target to Predict (Y):", df.columns)
-            
-            unique_count = df[target].nunique()
-            is_numeric_target = pd.api.types.is_numeric_dtype(df[target])
-            
-            task = st.radio("2. Task Type:", ["Classification (Group)", "Regression (Value)"])
-            
-            if task == "Classification (Group)" and unique_count > 20:
-                st.warning(f"⚠️ **High Complexity:** '{target}' has {unique_count} unique categories. Consider using Regression.")
+if mode == "Exploratory Analysis":
+    numeric_columns = df.select_dtypes(include=np.number).columns.tolist()
+    if len(numeric_columns) >= 2:
+        st.subheader("Correlation heatmap")
+        corr = df[numeric_columns].corr()
+        fig, ax = plt.subplots(figsize=(10, 7))
+        sns.heatmap(corr, annot=len(numeric_columns) <= 15, fmt=".2f", cmap="RdBu", center=0, ax=ax)
+        st.pyplot(fig)
+        plt.close(fig)
+    else:
+        st.info("At least two numeric columns are needed for a correlation heatmap.")
 
-            available_predictors = [col for col in num_cols if col != target]
-            
-            if st.checkbox("Rank Predictors by Relevance?", value=True):
-                if is_numeric_target:
-                    correlations = df[num_cols].corr()[target].abs().sort_values(ascending=False)
-                    available_predictors = correlations.drop(labels=[target]).index.tolist()
-                    st.caption(f"💡 Best Clue: **{available_predictors[0]}**")
+    st.subheader("Column summary")
+    summary = pd.DataFrame({
+        "Column": df.columns,
+        "Data type": [str(df[c].dtype) for c in df.columns],
+        "Missing": [int(df[c].isna().sum()) for c in df.columns],
+        "Unique values": [int(df[c].nunique(dropna=True)) for c in df.columns]
+    })
+    st.dataframe(summary, use_container_width=True, hide_index=True)
 
-            features = st.multiselect("3. Select Clues (X):", options=available_predictors)
+else:
+    st.subheader("Automatic model selection")
 
-            # --- UNIVERSAL DISTRIBUTION VISUALIZER ---
-            if features:
-                with st.expander("📊 Clue Distribution Analysis"):
-                    st.info("💡 **Why check this?**\n* **Linear Models & Naive Bayes:** Love bell curves.\n* **KNN & SVM:** Hate outliers.\n* **Trees:** Don't care about the shape, but seeing overlaps helps!")
-                    selected_feat = st.selectbox("Select Clue to Inspect:", features)
-                    fig_dist = px.histogram(df, x=selected_feat, color=target, marginal="box", 
-                                            title=f"Distribution of {selected_feat} by {target}", 
-                                            barmode="overlay", template="plotly_white")
-                    st.plotly_chart(fig_dist, use_container_width=True)
+    target = st.selectbox("Target column to predict", df.columns)
+    task = st.radio(
+        "Prediction task",
+        ["Classification", "Regression"],
+        horizontal=True,
+        help="Classification predicts groups or labels. Regression predicts numeric values."
+    )
 
-            algo_options = ["Linear/Logistic Regression", "Decision Tree", "Naive Bayes", "KNN", "SVM"]
-            if task == "Regression (Value)":
-                algo_options.remove("Naive Bayes")
-            
-            algo = st.selectbox("4. Algorithm:", algo_options)
-            
-            if algo == "Naive Bayes":
-                st.warning("⚠️ **Gaussian Assumption:** Naive Bayes assumes your clues follow a Bell Curve. If data is skewed, accuracy will be low.")
+    default_features = [c for c in df.columns if c != target]
+    features = st.multiselect(
+        "Predictor columns",
+        options=default_features,
+        default=default_features,
+        help="The target column is automatically excluded from the predictors."
+    )
 
-            depth = 5
-            if "Decision Tree" in algo:
-                depth = st.number_input("Select Max Tree Depth:", 1, 10, 5)
-            
-            if st.button("🚀 Start Model Training"):
-                if not features:
-                    st.error("Please select at least one feature (Clue) to train.")
-                else:
-                    try:
-                        X, y = df[features], df[target]
-                        class_names = None
-                        if "Classification" in task:
-                            le = LabelEncoder()
-                            y = le.fit_transform(y.astype(str))
-                            class_names = [str(c) for c in le.classes_]
-                        
-                        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                        scaler = StandardScaler().fit(X_train)
-                        X_tr_s, X_te_s = scaler.transform(X_train), scaler.transform(X_test)
+    if task == "Classification":
+        counts = df[target].astype("string").fillna("Unknown").value_counts()
+        st.write("Target class distribution")
+        st.dataframe(counts.rename("Rows").to_frame(), use_container_width=False)
+        if len(counts) > 20:
+            st.warning("This target has more than 20 classes. Classification may be difficult; regression may be more appropriate if the values are numeric.")
 
-                        if algo == "Linear/Logistic Regression":
-                            model = LogisticRegression(max_iter=1000) if "Classification" in task else LinearRegression()
-                        elif algo == "Decision Tree":
-                            model = DecisionTreeClassifier(max_depth=depth) if "Classification" in task else DecisionTreeRegressor(max_depth=depth)
-                        elif algo == "Naive Bayes": model = GaussianNB()
-                        elif algo == "KNN": model = KNeighborsClassifier() if "Classification" in task else KNeighborsRegressor()
-                        elif algo == "SVM": model = SVC() if "Classification" in task else SVR()
+    if st.button("🚀 Compare algorithms and select the best", type="primary"):
+        if not features:
+            st.error("Select at least one predictor column.")
+        else:
+            try:
+                X = df[features].copy()
+                X = X.replace([np.inf, -np.inf], np.nan)
+                X, y = prepare_target(df[[*features, target]], target, task)
 
-                        model.fit(X_tr_s, y_train)
-                        st.session_state.ml_results = {
-                            'model': model, 'target': target, 'features': features, 'task': task,
-                            'algo': algo, 'class_names': class_names, 'y_test': y_test, 
-                            'preds': model.predict(X_te_s), 'X_test_scaled': X_te_s ,'tree_depth': depth
-                        }
-                    except Exception as e: st.error(f"⚠️ Error: {str(e)}")
+                with st.spinner("Splitting data, cross-validating models, and testing the winner..."):
+                    if task == "Classification":
+                        result = evaluate_classification(X, y)
+                    else:
+                        result = evaluate_regression(X, y)
 
-        with m_col2:
-            if st.session_state.ml_results:
-                res = st.session_state.ml_results
-                model = res['model']
-                
-                st.write(f"### 🎯 Results for {res['target']}")
-                
-                # --- UPDATED CLASSIFICATION RESULTS SECTION ---
-                if "Classification" in res['task']:
-                    # 1. Calculate Metrics
-                    acc = accuracy_score(res['y_test'], res['preds'])
-                    prec = precision_score(res['y_test'], res['preds'], average='weighted', zero_division=0)
-                    rec = recall_score(res['y_test'], res['preds'], average='weighted', zero_division=0)
-                    f1 = f1_score(res['y_test'], res['preds'], average='weighted', zero_division=0)
-                    
-                    # 2. Display Metrics Row
-                    met1, met2, met3, met4 = st.columns(4)
-                    met1.metric("Accuracy", f"{acc:.2%}")
-                    met2.metric("Precision", f"{prec:.2%}")
-                    met3.metric("Recall", f"{rec:.2%}")
-                    met4.metric("F1-Score", f"{f1:.2%}")
+                st.session_state["ml_result"] = result
+                st.session_state["ml_target"] = target
+                st.success("Model comparison completed.")
 
-                    # 3. Explainer Expander
-                    with st.expander("📖 What do these scores mean?"):
-                        st.markdown("""
-                        * **Accuracy:** Overall correctness.
-                        * **Precision:** Quality of 'Positive' guesses (Low precision = many false alarms).
-                        * **Recall:** Ability to find all 'Positive' cases (Low recall = many missed cases).
-                        * **F1-Score:** The 'Harmonic Mean' of Precision and Recall. Best for imbalanced data.
-                        """)
+            except Exception as exc:
+                st.error(f"Training failed: {exc}")
 
-                    # 4. Confusion Matrix
-                    cm = confusion_matrix(res['y_test'], res['preds'].astype(int))
-                    fig, ax = plt.subplots(figsize=(8, 6))
-                    show_labels = len(res['class_names']) < 15
-                    sns.heatmap(cm, annot=show_labels, fmt='d', cmap="Purples", 
-                                xticklabels=res['class_names'] if show_labels else False, 
-                                yticklabels=res['class_names'] if show_labels else False, ax=ax)
-                    plt.xticks(rotation=45)
-                    ax.set_title("Confusion Matrix: Where did the model get confused?")
-                    st.pyplot(fig)
-                    plt.close(fig)
-                
-                else:
-                    # 1. Calculate Regression Metrics
-                    r2 = r2_score(res['y_test'], res['preds'])
-                    mae = mean_absolute_error(res['y_test'], res['preds'])
-                    mse = mean_squared_error(res['y_test'], res['preds'])
-                    rmse = np.sqrt(mse)
+    if "ml_result" in st.session_state:
+        show_model_results(st.session_state["ml_result"])
 
-                    # 2. Display Metrics in a 4-column row
-                    reg_met1, reg_met2, reg_met3, reg_met4 = st.columns(4)
-                    reg_met1.metric("R² Score", f"{r2:.2f}")
-                    reg_met2.metric("MAE", f"{mae:.2f}")
-                    reg_met3.metric("MSE", f"{mse:.2f}")
-                    reg_met4.metric("RMSE", f"{rmse:.2f}")
-
-                    with st.expander("📖 What do these regression scores mean?"):
-                        st.markdown("""
-                        * **R² Score:** How well the model fits the data (1.0 is perfect).
-                        * **MAE (Mean Absolute Error):** The average 'distance' your prediction is from the truth.
-                        * **MSE (Mean Squared Error):** Similar to MAE, but punishes large errors more heavily.
-                        * **RMSE (Root Mean Squared Error):** The standard deviation of the residuals (errors).
-                        """)
-
-                    # 3. Regression Plot
-                    fig_reg = px.scatter(x=res['y_test'], y=res['preds'], 
-                                       labels={'x': 'Actual Value', 'y': 'Predicted Value'}, 
-                                       title=f"Actual vs Predicted Comparison")
-                    fig_reg.add_shape(type="line", x0=min(res['y_test']), y0=min(res['y_test']), 
-                                    x1=max(res['y_test']), y1=max(res['y_test']), line=dict(color="Red", dash="dash"))
-                    st.plotly_chart(fig_reg, use_container_width=True)
-
-
-                st.divider()
-                st.write(f"### 🧠 {res['algo']} Logic Explainer")
-                
-                if "Decision Tree" in res['algo']:
-                    # 1. Generate the raw DOT data
-                    dot_data = export_graphviz(model, out_file=None, feature_names=res['features'],
-                        class_names=res['class_names'], filled=True, rounded=True, precision=2)
-                    
-                    st.write("🎮 **Interactive Logic Explorer**")
-                    st.caption("🖱️ **Zoom:** Mouse wheel | **Pan:** Click & Drag | **Reset:** Double-click")
-                    
-                    # 2. Prepare data safely
-                    import json
-                    dot_json = json.dumps(dot_data)
-                    
-                    # 3. The "HPCC + SVG-Pan-Zoom" Hybrid
-                    chart_html = f"""
-                    <div id="graph-container" style="width: 100%; height: 600px; border: 1px solid #d1d5db; border-radius: 8px; background: white; cursor: move; overflow: hidden;">
-                        <div id="placeholder" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #666;">
-                            Rendering Interactive Tree...
-                        </div>
-                    </div>
-
-                    <!-- Load the Zoom Library -->
-                    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
-                    
-                    <script type="module">
-                        import {{ Graphviz }} from "https://cdn.jsdelivr.net/npm/@hpcc-js/wasm/dist/index.js";
-                        
-                        async function render() {{
-                            try {{
-                                const graphviz = await Graphviz.load();
-                                const dot = {dot_json};
-                                const svgString = graphviz.dot(dot);
-                                
-                                const container = document.getElementById("placeholder");
-                                container.innerHTML = svgString;
-                                
-                                // Find the SVG element we just created
-                                const svgElement = container.querySelector("svg");
-                                svgElement.style.width = "100%";
-                                svgElement.style.height = "100%";
-                                
-                                // Initialize Zoom and Pan
-                                window.panZoom = svgPanZoom(svgElement, {{
-                                    zoomEnabled: true,
-                                    controlIconsEnabled: true,
-                                    fit: true,
-                                    center: true,
-                                    minZoom: 0.1,
-                                    maxZoom: 10
-                                }});
-                                
-                            }} catch (e) {{
-                                document.getElementById("placeholder").innerHTML = "❌ Error: " + e.message;
-                            }}
-                        }}
-                        render();
-                    </script>
-                    """
-                    
-                    # 4. Render in Streamlit
-                    components.html(chart_html, height=620)
-
-                   
-                elif "Regression" in res['algo']:
-                    with st.expander("🔍 The 'Weight' Logic"):
-                        st.latex(r"y = w_1x_1 + w_2x_2 + ... + b")
-
-                elif "KNN" in res['algo']:
-                    with st.expander("🔍 The 'Neighbor' Logic"):
-                        st.write("Looks for the **K** most similar rows and averages their results.")
-
-                elif "Naive Bayes" in res['algo']:
-                    with st.expander("🔍 The 'Probability' Logic"):
-                        st.latex(r"P(C | Clues) = \frac{P(Clues | C) \times P(C)}{P(Clues)}")
-
-                elif "SVM" in res['algo']:
-                    with st.expander("🔍 The 'Boundary' Logic"):
-                        st.write("Finds the best boundary (hyperplane) that separates different groups.")
-                
-                st.divider()
-                st.write("### 📊 Predictor Influence")
-                importance_data = None
-                if hasattr(model, 'feature_importances_'): 
-                    importance_data = model.feature_importances_
-                elif hasattr(model, 'coef_'): 
-                    importance_data = np.abs(model.coef_).mean(axis=0) if len(model.coef_.shape) > 1 else np.abs(model.coef_)
-                else:
-                    perm = permutation_importance(model, res['X_test_scaled'], res['y_test'], n_repeats=5, random_state=42)
-                    importance_data = perm.importances_mean
-
-                if importance_data is not None:
-                    imp_df = pd.DataFrame({'Feature': res['features'], 'Value': importance_data}).sort_values(by='Value')
-                    fig_imp = px.bar(imp_df, x='Value', y='Feature', orientation='h', color='Value', color_continuous_scale='Portland')
-                    st.plotly_chart(fig_imp, use_container_width=True)
-            else:
-                st.info("Train a model to see the logic visualization here.")
-
-# Footer
-st.markdown("---")
-st.markdown("<p style='text-align: center; color: grey;'>© timothymarkbale2026 | Educational ML Laboratory</p>", unsafe_allow_html=True)
+st.divider()
+st.caption("Educational ML Laboratory | Model scores are estimates, not guarantees of future performance.")
