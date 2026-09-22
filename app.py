@@ -105,7 +105,10 @@ TEST_SIZE = 0.20            # 80/20 split
 MAX_CATEGORIES = 30         # categorical columns above this are treated as ID/free-text
 MIN_CLASS_ROWS = 10         # classes rarer than this cannot be split/validated reliably
 TUNE_ROWS = 6000            # rows used for hyperparameter search (keeps big CSVs fast)
-CAP_ROWS = {"SVM": 25000, "KNN": 100000}   # final-fit caps for algorithms that scale badly
+CAP_ROWS = {
+    "SVM": 25000,
+    "KNN": 100000
+}  # final-fit caps for algorithms that scale badly
 TARGET_SCORE = 0.90         # quality gate shown to the user
 AUTO = "🏆 Auto-Compare All (Recommended)"
 
@@ -743,31 +746,50 @@ def train_and_compare(X, y, clf, algos, tune, manual_depth, on_progress):
         preds = pipe.predict(X_te)
         tr_preds = pipe.predict(X_tr_probe)
         if clf:
-        if balanced:
-            test_score = balanced_accuracy_score(
+            if balanced:
+                test_score = balanced_accuracy_score(
+                    y_te,
+                    preds
+                )
+
+                train_score = balanced_accuracy_score(
+                    y_tr_probe,
+                    tr_preds
+                )
+            else:
+                test_score = accuracy_score(
+                    y_te,
+                    preds
+                )
+
+                train_score = accuracy_score(
+                    y_tr_probe,
+                    tr_preds
+                )
+
+            extra = balanced_accuracy_score(
                 y_te,
                 preds
             )
-    
-            train_score = balanced_accuracy_score(
-                y_tr_probe,
-                tr_preds
-            )
+
         else:
-            test_score = accuracy_score(
+            test_score = r2_score(
                 y_te,
                 preds
             )
-    
-            train_score = accuracy_score(
+
+            train_score = r2_score(
                 y_tr_probe,
                 tr_preds
             )
-    
-        extra = balanced_accuracy_score(
-            y_te,
-            preds
-        )
+
+            extra = np.sqrt(
+                mean_squared_error(
+                    y_te,
+                    preds
+                )
+            )
+
 
 
         rows.append({
@@ -872,7 +894,7 @@ def render_tree(pipe, class_names):
 st.set_page_config(
     page_title="Machine Learning Intuition Lab", layout="wide", page_icon="🧪",
     menu_items={'About': " Machine Learning Intuition Lab A Project in Fullfillment with the Requirement of MSIT643 Submitted by Timothy Mark A. Bal-e"})
-st.title("🧪 Machine Learning Intuition Lab")
+st.title("Machine Learning Intuition Lab")
 hide_branding_style = """
     <style>
     footer {display: none !important;}
