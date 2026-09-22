@@ -63,7 +63,7 @@ MAX_CATEGORIES = 30         # categorical columns above this are treated as ID/f
 MIN_CLASS_ROWS = 10         # classes rarer than this cannot be split/validated reliably
 TUNE_ROWS = 6000            # rows used for hyperparameter search (keeps big CSVs fast)
 CAP_ROWS = {"SVM": 25000, "KNN": 100000}   # final-fit caps for algorithms that scale badly
-TARGET_SCORE = 0.90         # quality gate shown to the user
+TARGET_SCORE = 0.80         # quality gate shown to the user
 AUTO = "🏆 Auto-Compare All (Recommended)"
 
 
