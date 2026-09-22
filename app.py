@@ -1242,13 +1242,13 @@ if uploaded_file:
                 st.divider()
                 st.write("### 1️⃣4️⃣ Suggested Improvements")
                 main_score = test_main
-                if main_score >= 0.95:
+                if main_score >= 0.80:
                     st.success(f"✅ Excellent: {score_name} {main_score:.2%}" if clf_r else f"✅ Excellent: R² {main_score:.3f}")
                 elif main_score >= TARGET_SCORE:
-                    st.success(f"✅ Meets the 90% target: {score_name} {main_score:.2%}" if clf_r else f"✅ Meets the 0.90 target: R² {main_score:.3f}")
+                    st.success(f"✅ Meets the 80% target: {score_name} {main_score:.2%}" if clf_r else f"✅ Meets the 0.90 target: R² {main_score:.3f}")
                 else:
-                    st.warning(f"⚠️ Below the 90% target ({score_name} = {main_score:.2%})." if clf_r else
-                               f"⚠️ Below the 0.90 target (R² = {main_score:.3f}).")
+                    st.warning(f"⚠️ Below the 80% target ({score_name} = {main_score:.2%})." if clf_r else
+                               f"⚠️ Below the 0.80 target (R² = {main_score:.3f}).")
                 tips = []
                 if clf_r and main_score - res['baseline'] < 0.05:
                     tips.append(f"The model barely beats always guessing the most common class ({res['baseline']:.2%}). "
