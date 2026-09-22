@@ -41,6 +41,62 @@ from sklearn.tree import (
     DecisionTreeClassifier, DecisionTreeRegressor, export_graphviz,
 )
 
+from sklearn.ensemble import (
+    AdaBoostClassifier,
+    AdaBoostRegressor,
+    ExtraTreesClassifier,
+    ExtraTreesRegressor,
+    GradientBoostingClassifier,
+    GradientBoostingRegressor,
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+    IsolationForest,
+    RandomForestClassifier,
+    RandomForestRegressor,
+)
+
+from sklearn.cluster import (
+    AgglomerativeClustering,
+    Birch,
+    DBSCAN,
+    KMeans,
+    MiniBatchKMeans,
+)
+
+from sklearn.mixture import GaussianMixture
+from sklearn.manifold import TSNE
+
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+
+from sklearn.linear_model import (
+    ElasticNet,
+    Lasso,
+    LinearRegression,
+    LogisticRegression,
+    Ridge,
+)
+
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    calinski_harabasz_score,
+    confusion_matrix,
+    davies_bouldin_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    r2_score,
+    recall_score,
+    silhouette_score,
+)
+
+from sklearn.neural_network import (
+    MLPClassifier,
+    MLPRegressor,
+)
+
+
 # ----------------------------------------------------------------------------
 # CONSTANTS
 # ----------------------------------------------------------------------------
@@ -160,51 +216,433 @@ def make_preprocessor(X):
 
 
 def build_candidates(clf, balanced):
-    """name -> (estimator, hyper-parameter grid). Grid keys target the pipeline step 'model'."""
+    """
+    Build supervised-learning candidate models.
+
+    Returns:
+        {
+            algorithm_name: (estimator, hyperparameter_grid)
+        }
+    """
+
     cw = "balanced" if balanced else None
+
     if clf:
         return {
             "Linear/Logistic Regression": (
-                LogisticRegression(max_iter=2000, class_weight=cw),
-                {"model__C": [0.1, 1, 10]}),
+                LogisticRegression(
+                    max_iter=2000,
+                    class_weight=cw,
+                    random_state=SEED
+                ),
+                {
+                    "model__C": [0.1, 1, 10]
+                }
+            ),
+
+            "Linear Discriminant Analysis": (
+                LinearDiscriminantAnalysis(),
+                {
+                    "model__solver": ["svd", "lsqr"]
+                }
+            ),
+
             "Decision Tree": (
-                DecisionTreeClassifier(random_state=SEED, class_weight=cw),
-                {"model__max_depth": [3, 5, 7, 10], "model__min_samples_leaf": [1, 5, 20]}),
+                DecisionTreeClassifier(
+                    random_state=SEED,
+                    class_weight=cw
+                ),
+                {
+                    "model__max_depth": [3, 5, 7, 10, None],
+                    "model__min_samples_leaf": [1, 5, 20]
+                }
+            ),
+
             "Naive Bayes": (
                 GaussianNB(),
-                {"model__var_smoothing": [1e-9, 1e-8, 1e-7]}),
+                {
+                    "model__var_smoothing": [
+                        1e-9,
+                        1e-8,
+                        1e-7
+                    ]
+                }
+            ),
+
             "KNN": (
                 KNeighborsClassifier(),
-                {"model__n_neighbors": [3, 5, 11, 21], "model__weights": ["uniform", "distance"]}),
+                {
+                    "model__n_neighbors": [3, 5, 11, 21],
+                    "model__weights": [
+                        "uniform",
+                        "distance"
+                    ]
+                }
+            ),
+
             "SVM": (
-                SVC(class_weight=cw, random_state=SEED),
-                {"model__C": [0.5, 1, 5, 20]}),
+                SVC(
+                    class_weight=cw,
+                    probability=True,
+                    random_state=SEED
+                ),
+                {
+                    "model__C": [0.5, 1, 5, 20],
+                    "model__kernel": ["rbf", "linear"]
+                }
+            ),
+
             "Random Forest": (
-                RandomForestClassifier(n_estimators=150, class_weight=cw, random_state=SEED, n_jobs=1),
-                {"model__max_depth": [None, 10, 20], "model__min_samples_leaf": [1, 3]}),
+                RandomForestClassifier(
+                    n_estimators=200,
+                    class_weight=cw,
+                    random_state=SEED,
+                    n_jobs=1
+                ),
+                {
+                    "model__max_depth": [
+                        None,
+                        10,
+                        20
+                    ],
+                    "model__min_samples_leaf": [
+                        1,
+                        3,
+                        10
+                    ]
+                }
+            ),
+
+            "Extra Trees": (
+                ExtraTreesClassifier(
+                    n_estimators=200,
+                    class_weight=cw,
+                    random_state=SEED,
+                    n_jobs=1
+                ),
+                {
+                    "model__max_depth": [
+                        None,
+                        10,
+                        20
+                    ],
+                    "model__min_samples_leaf": [
+                        1,
+                        3,
+                        10
+                    ]
+                }
+            ),
+
             "Gradient Boosting": (
-                HistGradientBoostingClassifier(class_weight=cw, random_state=SEED),
-                {"model__learning_rate": [0.05, 0.1, 0.2], "model__max_depth": [None, 5]}),
+                GradientBoostingClassifier(
+                    random_state=SEED
+                ),
+                {
+                    "model__learning_rate": [
+                        0.03,
+                        0.1,
+                        0.2
+                    ],
+                    "model__n_estimators": [
+                        100,
+                        200
+                    ],
+                    "model__max_depth": [
+                        2,
+                        3,
+                        5
+                    ]
+                }
+            ),
+
+            "HistGradient Boosting": (
+                HistGradientBoostingClassifier(
+                    random_state=SEED
+                ),
+                {
+                    "model__learning_rate": [
+                        0.05,
+                        0.1
+                    ],
+                    "model__max_iter": [
+                        100,
+                        200
+                    ],
+                    "model__max_leaf_nodes": [
+                        15,
+                        31
+                    ]
+                }
+            ),
+
+            "AdaBoost": (
+                AdaBoostClassifier(
+                    random_state=SEED
+                ),
+                {
+                    "model__n_estimators": [
+                        50,
+                        100,
+                        200
+                    ],
+                    "model__learning_rate": [
+                        0.05,
+                        0.1,
+                        1.0
+                    ]
+                }
+            ),
+
+            "Neural Network": (
+                MLPClassifier(
+                    max_iter=500,
+                    early_stopping=True,
+                    random_state=SEED
+                ),
+                {
+                    "model__hidden_layer_sizes": [
+                        (32,),
+                        (64, 32),
+                        (128, 64, 32)
+                    ],
+                    "model__alpha": [
+                        0.0001,
+                        0.001,
+                        0.01
+                    ]
+                }
+            ),
         }
+
     return {
-        "Linear/Logistic Regression": (LinearRegression(), {}),
+        "Linear Regression": (
+            LinearRegression(),
+            {}
+        ),
+
+        "Ridge Regression": (
+            Ridge(),
+            {
+                "model__alpha": [
+                    0.01,
+                    0.1,
+                    1,
+                    10,
+                    100
+                ]
+            }
+        ),
+
+        "Lasso Regression": (
+            Lasso(max_iter=5000),
+            {
+                "model__alpha": [
+                    0.001,
+                    0.01,
+                    0.1,
+                    1
+                ]
+            }
+        ),
+
+        "Elastic Net": (
+            ElasticNet(max_iter=5000),
+            {
+                "model__alpha": [
+                    0.001,
+                    0.01,
+                    0.1,
+                    1
+                ],
+                "model__l1_ratio": [
+                    0.1,
+                    0.5,
+                    0.9
+                ]
+            }
+        ),
+
         "Decision Tree": (
-            DecisionTreeRegressor(random_state=SEED),
-            {"model__max_depth": [3, 5, 7, 10], "model__min_samples_leaf": [1, 5, 20]}),
+            DecisionTreeRegressor(
+                random_state=SEED
+            ),
+            {
+                "model__max_depth": [
+                    3,
+                    5,
+                    7,
+                    10,
+                    None
+                ],
+                "model__min_samples_leaf": [
+                    1,
+                    5,
+                    20
+                ]
+            }
+        ),
+
         "KNN": (
             KNeighborsRegressor(),
-            {"model__n_neighbors": [3, 5, 11, 21], "model__weights": ["uniform", "distance"]}),
-        "SVM": (
-            TransformedTargetRegressor(regressor=SVR(), transformer=StandardScaler()),
-            {"model__regressor__C": [0.5, 1, 5, 20], "model__regressor__epsilon": [0.05, 0.1, 0.2]}),
-        "Random Forest": (
-            RandomForestRegressor(n_estimators=150, random_state=SEED, n_jobs=1),
-            {"model__max_depth": [None, 10, 20], "model__min_samples_leaf": [1, 3]}),
-        "Gradient Boosting": (
-            HistGradientBoostingRegressor(random_state=SEED),
-            {"model__learning_rate": [0.05, 0.1, 0.2], "model__max_depth": [None, 5]}),
-    }
+            {
+                "model__n_neighbors": [
+                    3,
+                    5,
+                    11,
+                    21
+                ],
+                "model__weights": [
+                    "uniform",
+                    "distance"
+                ]
+            }
+        ),
 
+        "SVM": (
+            TransformedTargetRegressor(
+                regressor=SVR(),
+                transformer=StandardScaler()
+            ),
+            {
+                "model__regressor__C": [
+                    0.5,
+                    1,
+                    5,
+                    20
+                ],
+                "model__regressor__epsilon": [
+                    0.05,
+                    0.1,
+                    0.2
+                ],
+                "model__regressor__kernel": [
+                    "rbf",
+                    "linear"
+                ]
+            }
+        ),
+
+        "Random Forest": (
+            RandomForestRegressor(
+                n_estimators=200,
+                random_state=SEED,
+                n_jobs=1
+            ),
+            {
+                "model__max_depth": [
+                    None,
+                    10,
+                    20
+                ],
+                "model__min_samples_leaf": [
+                    1,
+                    3,
+                    10
+                ]
+            }
+        ),
+
+        "Extra Trees": (
+            ExtraTreesRegressor(
+                n_estimators=200,
+                random_state=SEED,
+                n_jobs=1
+            ),
+            {
+                "model__max_depth": [
+                    None,
+                    10,
+                    20
+                ],
+                "model__min_samples_leaf": [
+                    1,
+                    3,
+                    10
+                ]
+            }
+        ),
+
+        "Gradient Boosting": (
+            GradientBoostingRegressor(
+                random_state=SEED
+            ),
+            {
+                "model__learning_rate": [
+                    0.03,
+                    0.1,
+                    0.2
+                ],
+                "model__n_estimators": [
+                    100,
+                    200
+                ],
+                "model__max_depth": [
+                    2,
+                    3,
+                    5
+                ]
+            }
+        ),
+
+        "HistGradient Boosting": (
+            HistGradientBoostingRegressor(
+                random_state=SEED
+            ),
+            {
+                "model__learning_rate": [
+                    0.05,
+                    0.1
+                ],
+                "model__max_iter": [
+                    100,
+                    200
+                ],
+                "model__max_leaf_nodes": [
+                    15,
+                    31
+                ]
+            }
+        ),
+
+        "AdaBoost": (
+            AdaBoostRegressor(
+                random_state=SEED
+            ),
+            {
+                "model__n_estimators": [
+                    50,
+                    100,
+                    200
+                ],
+                "model__learning_rate": [
+                    0.05,
+                    0.1,
+                    1.0
+                ]
+            }
+        ),
+
+        "Neural Network": (
+            MLPRegressor(
+                max_iter=500,
+                early_stopping=True,
+                random_state=SEED
+            ),
+            {
+                "model__hidden_layer_sizes": [
+                    (32,),
+                    (64, 32),
+                    (128, 64, 32)
+                ],
+                "model__alpha": [
+                    0.0001,
+                    0.001,
+                    0.01
+                ]
+            }
+        ),
+    }
 
 def subsample(X, y, n, clf):
     if len(X) <= n:
@@ -305,13 +743,32 @@ def train_and_compare(X, y, clf, algos, tune, manual_depth, on_progress):
         preds = pipe.predict(X_te)
         tr_preds = pipe.predict(X_tr_probe)
         if clf:
-            test_score = accuracy_score(y_te, preds)
-            train_score = accuracy_score(y_tr_probe, tr_preds)
-            extra = balanced_accuracy_score(y_te, preds)
+        if balanced:
+            test_score = balanced_accuracy_score(
+                y_te,
+                preds
+            )
+    
+            train_score = balanced_accuracy_score(
+                y_tr_probe,
+                tr_preds
+            )
         else:
-            test_score = r2_score(y_te, preds)
-            train_score = r2_score(y_tr_probe, tr_preds)
-            extra = np.sqrt(mean_squared_error(y_te, preds))
+            test_score = accuracy_score(
+                y_te,
+                preds
+            )
+    
+            train_score = accuracy_score(
+                y_tr_probe,
+                tr_preds
+            )
+    
+        extra = balanced_accuracy_score(
+            y_te,
+            preds
+        )
+
 
         rows.append({
             "Algorithm": name,
@@ -454,8 +911,15 @@ if uploaded_file:
     st.divider()
 
     mode = st.radio("Select Active Workspace:",
-                    ["None", "Exploratory Analysis (PCA & Heatmap)", "Machine Learning Workshop"],
-                    horizontal=True)
+    [
+        "None",
+        "Exploratory Analysis (PCA & Heatmap)",
+        "Machine Learning Workshop",
+        "Unsupervised Discovery"
+    ],
+    horizontal=True
+    )
+
 
     # --- PATH A: EXPLORATORY ANALYSIS ---
     if mode == "Exploratory Analysis (PCA & Heatmap)":
@@ -473,9 +937,41 @@ if uploaded_file:
             target_color = st.selectbox("Color Map by:", df.columns, key="pca_color")
 
             if st.button("Generate PCA Insights") and len(pca_feats) >= 2:
-                X_pca = StandardScaler().fit_transform(df[pca_feats])
+                pca_input = df[pca_feats].copy()
+                pca_input = pca_input.replace(
+                    [np.inf, -np.inf],
+                    np.nan
+                )
+                
+                pca_input = pca_input.fillna(
+                    pca_input.median(numeric_only=True)
+                )
+                
+                X_pca = StandardScaler().fit_transform(
+                    pca_input
+                )
                 pca = PCA(n_components=2)
                 comps = pca.fit_transform(X_pca)
+
+                pca_source = df.sample(
+                    min(len(df), 20000),
+                    random_state=SEED
+                )
+                
+                pca_input = pca_source[pca_feats].copy()
+                
+                pca_input = pca_input.replace(
+                    [np.inf, -np.inf],
+                    np.nan
+                )
+                
+                pca_input = pca_input.fillna(
+                    pca_input.median(numeric_only=True)
+                )
+                
+                X_pca = StandardScaler().fit_transform(
+                    pca_input
+                )
 
                 loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=pca_feats)
                 top_driver_pc1 = loadings['PC1'].abs().idxmax()
@@ -487,7 +983,7 @@ if uploaded_file:
                 label_y = f"PC2 ({var_pc2:.1f}%) — Primary Driver: {top_driver_pc2}"
 
                 pdf = pd.DataFrame(comps, columns=['PC1', 'PC2'])
-                pdf[target_color] = df[target_color].values
+                pdf[target_color] = pca_source[target_color].astype(str).values
 
                 fig_pca = px.scatter(
                     pdf, x='PC1', y='PC2', color=target_color,
@@ -686,7 +1182,16 @@ if uploaded_file:
                     met2.metric("Precision", f"{prec:.2%}")
                     met3.metric("Recall", f"{rec:.2%}")
                     met4.metric("F1-Score", f"{f1:.2%}")
-                    main_score, score_name = acc, "accuracy"
+                    if res["balanced"]:
+                    main_score = balanced_accuracy_score(
+                        y_test,
+                        preds
+                    )
+                    score_name = "balanced accuracy"
+                    else:
+                    main_score = acc
+                    score_name = "accuracy"
+
 
                     with st.expander("📖 What do these scores mean?"):
                         st.markdown("""
@@ -706,6 +1211,53 @@ if uploaded_file:
                     ax.set_title("Confusion Matrix: Where did the model get confused?")
                     st.pyplot(fig)
                     plt.close(fig)
+
+                    prediction_quality = pd.DataFrame({
+                        "Row": np.arange(len(y_test)),
+                        "Actual": [
+                            res["class_names"][i]
+                            for i in y_test
+                        ],
+                        "Predicted": [
+                            res["class_names"][i]
+                            for i in preds
+                        ],
+                        "Correct": y_test == preds
+                    })
+
+                    fig_prediction_quality = px.scatter(
+                        prediction_quality,
+                        x="Row",
+                        y="Actual",
+                        color="Correct",
+                        symbol="Predicted",
+                        hover_data=[
+                            "Predicted"
+                        ],
+                        title="Prediction Quality by Test Row",
+                        color_discrete_map={
+                            True: "#2ca02c",
+                            False: "#d62728"
+                        },
+                        template="plotly_white"
+                    )
+
+                    fig_prediction_quality.update_traces(
+                        marker={
+                            "size": 9,
+                            "opacity": 0.8
+                        }
+                    )
+
+                    st.plotly_chart(
+                        fig_prediction_quality,
+                        use_container_width=True
+                    )
+
+                    st.caption(
+                        "Green points are correct predictions. "
+                        "Red points are incorrect predictions."
+                    )
 
                     with st.expander("🔀 Split balance check (train vs test class share)"):
                         names = res['class_names']
@@ -747,6 +1299,49 @@ if uploaded_file:
                                       line=dict(color="Red", dash="dash"))
                     st.plotly_chart(fig_reg, use_container_width=True)
 
+                                    residuals = y_test - preds
+
+                    residual_df = pd.DataFrame({
+                        "Actual": y_test,
+                        "Predicted": preds,
+                        "Residual": residuals
+                    })
+
+                    fig_residuals = px.scatter(
+                        residual_df,
+                        x="Predicted",
+                        y="Residual",
+                        color="Residual",
+                        color_continuous_scale="RdBu",
+                        title="Residual Plot",
+                        labels={
+                            "Predicted": "Predicted value",
+                            "Residual": (
+                                "Residual "
+                                "(Actual - Predicted)"
+                            )
+                        },
+                        template="plotly_white"
+                    )
+
+                    fig_residuals.add_hline(
+                        y=0,
+                        line_dash="dash",
+                        line_color="black"
+                    )
+
+                    st.plotly_chart(
+                        fig_residuals,
+                        use_container_width=True
+                    )
+
+                    st.info(
+                        "A good residual plot has points scattered randomly "
+                        "around zero. Curves or funnel shapes may indicate "
+                        "nonlinearity, unequal variance, or missing features."
+                    )
+
+
                 # ---- honest quality gate ----
                 best_row = res['leaderboard'].iloc[0]
                 gap = float(best_row["Overfit gap"])
@@ -779,6 +1374,40 @@ if uploaded_file:
                     st.caption("Ranked by cross-validation on the training data. 'Overfit gap' = train score − test score (large = memorising).")
                     lb = res['leaderboard'].copy()
                     pct_cols = [c for c in lb.columns if c.startswith("CV score") or c in ("CV ± std", "Test score", "Train score", "Overfit gap")]
+                                        st.write(
+                        "### 📈 Visual Model Comparison"
+                    )
+
+                    cv_column = f"CV score ({res['scoring']})"
+
+                    fig_model_comparison = px.bar(
+                        lb,
+                        x="Algorithm",
+                        y=cv_column,
+                        color="Overfit gap",
+                        hover_data=[
+                            "Test score",
+                            "Train score",
+                            "CV ± std",
+                            "Time (s)"
+                        ],
+                        title=(
+                            "Cross-Validation Score and "
+                            "Overfitting Gap"
+                        ),
+                        color_continuous_scale="RdYlBu_r",
+                        template="plotly_white"
+                    )
+
+                    fig_model_comparison.update_layout(
+                        xaxis_tickangle=-35
+                    )
+
+                    st.plotly_chart(
+                        fig_model_comparison,
+                        use_container_width=True
+                    )
+
                     st.dataframe(lb.style.format({**{c: "{:.3f}" for c in pct_cols},
                                                   "Time (s)": "{:.1f}",
                                                   ("Balanced acc." if clf_r else "RMSE"): "{:.3f}"}),
@@ -828,6 +1457,471 @@ if uploaded_file:
                     st.info("Importance could not be computed for this model.")
             else:
                 st.info("Train a model to see the logic visualization here.")
+    # ------------------------------------------------------------------------
+    # PATH C: UNSUPERVISED DISCOVERY
+    # ------------------------------------------------------------------------
+    elif mode == "Unsupervised Discovery":
+
+        st.subheader("🔍 Unsupervised Discovery Laboratory")
+
+        st.info(
+            "Unsupervised learning searches for hidden patterns without using "
+            "a target column. It can discover groups and unusual records."
+        )
+
+        numeric_cols = df.select_dtypes(
+            include=[np.number]
+        ).columns.tolist()
+
+        if len(numeric_cols) < 2:
+            st.warning(
+                "At least two numeric columns are required."
+            )
+        else:
+
+            left, right = st.columns([1, 2])
+
+            with left:
+                st.write("### ⚙️ Discovery Settings")
+
+                unsup_features = st.multiselect(
+                    "Select numeric features:",
+                    numeric_cols,
+                    default=numeric_cols[
+                        :min(5, len(numeric_cols))
+                    ]
+                )
+
+                unsup_method = st.selectbox(
+                    "Choose method:",
+                    [
+                        "K-Means Clustering",
+                        "Mini-Batch K-Means",
+                        "Hierarchical Clustering",
+                        "DBSCAN Clustering",
+                        "Birch Clustering",
+                        "Gaussian Mixture Clustering",
+                        "Isolation Forest"
+                    ]
+                )
+
+                scale_features = st.checkbox(
+                    "Standardize features",
+                    value=True,
+                    help=(
+                        "Recommended when columns use different units."
+                    )
+                )
+
+                n_clusters = 3
+                eps = 0.5
+                min_samples = 5
+
+                if unsup_method in [
+                    "K-Means Clustering",
+                    "Mini-Batch K-Means",
+                    "Hierarchical Clustering",
+                    "Birch Clustering",
+                    "Gaussian Mixture Clustering"
+                ]:
+                    n_clusters = st.slider(
+                        "Number of groups:",
+                        min_value=2,
+                        max_value=10,
+                        value=3
+                    )
+
+                if unsup_method == "DBSCAN Clustering":
+                    eps = st.slider(
+                        "Neighborhood radius:",
+                        min_value=0.1,
+                        max_value=5.0,
+                        value=0.5,
+                        step=0.1
+                    )
+
+                    min_samples = st.slider(
+                        "Minimum neighbors:",
+                        min_value=2,
+                        max_value=20,
+                        value=5
+                    )
+
+                run_discovery = st.button(
+                    "🚀 Discover Hidden Structure",
+                    type="primary"
+                )
+
+            with right:
+
+                if not unsup_features:
+                    st.info(
+                        "Select at least two numeric features."
+                    )
+
+                elif len(unsup_features) < 2:
+                    st.info(
+                        "Select at least two numeric features."
+                    )
+
+                elif run_discovery:
+
+                    try:
+                        discovery = run_unsupervised_analysis(
+                            df=df,
+                            features=unsup_features,
+                            method=unsup_method,
+                            n_clusters=n_clusters,
+                            eps=eps,
+                            min_samples=min_samples,
+                            scale_features=scale_features,
+                            random_state=SEED
+                        )
+
+                        result_df = discovery["result"]
+                        metrics = discovery["metrics"]
+
+                        st.write("### 📊 Discovery Summary")
+
+                        m1, m2, m3, m4 = st.columns(4)
+
+                        m1.metric(
+                            "Rows analyzed",
+                            f"{metrics['rows']:,}"
+                        )
+
+                        m2.metric(
+                            "Features used",
+                            metrics["features"]
+                        )
+
+                        if unsup_method == "Isolation Forest":
+                            m3.metric(
+                                "Anomalies",
+                                f"{metrics['anomalies']:,}"
+                            )
+
+                            anomaly_rate = (
+                                metrics["anomalies"]
+                                / metrics["rows"]
+                            )
+
+                            m4.metric(
+                                "Anomaly rate",
+                                f"{anomaly_rate:.2%}"
+                            )
+                        else:
+                            m3.metric(
+                                "Groups found",
+                                metrics["groups"]
+                            )
+
+                            if metrics["silhouette"] is None:
+                                m4.metric(
+                                    "Silhouette",
+                                    "N/A"
+                                )
+                            else:
+                                m4.metric(
+                                    "Silhouette",
+                                    f"{metrics['silhouette']:.3f}"
+                                )
+
+                        # ----------------------------------------------------
+                        # PCA group map
+                        # ----------------------------------------------------
+                        st.write(
+                            "### 🗺️ Visual Map of the Discovered Structure"
+                        )
+
+                        plot_df = result_df.copy()
+
+                        if unsup_method == "Isolation Forest":
+                            color_column = "Status"
+                            title = (
+                                "Normal Rows and Anomalies "
+                                "(PCA Projection)"
+                            )
+                        else:
+                            color_column = "Group"
+                            title = (
+                                f"{unsup_method} "
+                                "(PCA Projection)"
+                            )
+
+                        fig_map = px.scatter(
+                            plot_df,
+                            x="PCA 1",
+                            y="PCA 2",
+                            color=color_column,
+                            hover_data=unsup_features + ["Row"],
+                            title=title,
+                            template="plotly_white"
+                        )
+
+                        fig_map.update_traces(
+                            marker={
+                                "size": 8,
+                                "opacity": 0.75
+                            }
+                        )
+
+                        st.plotly_chart(
+                            fig_map,
+                            use_container_width=True
+                        )
+
+                        st.caption(
+                            "Each point represents one row. Points that are "
+                            "near each other have similar feature patterns."
+                        )
+
+                        # ----------------------------------------------------
+                        # Elbow chart
+                        # ----------------------------------------------------
+                        if unsup_method == "K-Means Clustering":
+
+                            st.write(
+                                "### 📉 Choosing the Number of Groups"
+                            )
+
+                            max_k = min(
+                                10,
+                                max(2, len(result_df) - 1)
+                            )
+
+                            k_values = list(
+                                range(2, max_k + 1)
+                            )
+
+                            elbow_rows = []
+
+                            clean_data = result_df[
+                                unsup_features
+                            ].copy()
+
+                            clean_data = clean_data.replace(
+                                [np.inf, -np.inf],
+                                np.nan
+                            )
+
+                            clean_data = clean_data.fillna(
+                                clean_data.median(
+                                    numeric_only=True
+                                )
+                            )
+
+                            if scale_features:
+                                elbow_X = StandardScaler().fit_transform(
+                                    clean_data
+                                )
+                            else:
+                                elbow_X = clean_data.to_numpy()
+
+                            for k in k_values:
+                                temp_model = KMeans(
+                                    n_clusters=k,
+                                    n_init=10,
+                                    random_state=SEED
+                                )
+
+                                temp_labels = (
+                                    temp_model.fit_predict(elbow_X)
+                                )
+
+                                temp_silhouette = silhouette_score(
+                                    elbow_X,
+                                    temp_labels
+                                )
+
+                                elbow_rows.append({
+                                    "Groups": k,
+                                    "Inertia": temp_model.inertia_,
+                                    "Silhouette": temp_silhouette
+                                })
+
+                            elbow_df = pd.DataFrame(elbow_rows)
+
+                            e1, e2 = st.columns(2)
+
+                            with e1:
+                                fig_elbow = px.line(
+                                    elbow_df,
+                                    x="Groups",
+                                    y="Inertia",
+                                    markers=True,
+                                    title="Elbow Method",
+                                    template="plotly_white"
+                                )
+
+                                st.plotly_chart(
+                                    fig_elbow,
+                                    use_container_width=True
+                                )
+
+                            with e2:
+                                fig_silhouette = px.line(
+                                    elbow_df,
+                                    x="Groups",
+                                    y="Silhouette",
+                                    markers=True,
+                                    title="Silhouette by Group Count",
+                                    template="plotly_white"
+                                )
+
+                                st.plotly_chart(
+                                    fig_silhouette,
+                                    use_container_width=True
+                                )
+
+                            st.info(
+                                "The elbow is the point where adding more "
+                                "groups produces only a small reduction in "
+                                "inertia. Higher silhouette values generally "
+                                "indicate better-separated groups."
+                            )
+
+                        # ----------------------------------------------------
+                        # Feature distribution by group
+                        # ----------------------------------------------------
+                        if unsup_method != "Isolation Forest":
+
+                            st.write(
+                                "### 📦 Feature Distributions by Group"
+                            )
+
+                            selected_box_feature = st.selectbox(
+                                "Choose a feature:",
+                                unsup_features,
+                                key="unsup_box_feature"
+                            )
+
+                            fig_box = px.box(
+                                result_df,
+                                x="Group",
+                                y=selected_box_feature,
+                                color="Group",
+                                points=False,
+                                title=(
+                                    f"{selected_box_feature} "
+                                    "by group"
+                                ),
+                                template="plotly_white"
+                            )
+
+                            st.plotly_chart(
+                                fig_box,
+                                use_container_width=True
+                            )
+
+                        # ----------------------------------------------------
+                        # Group profile table
+                        # ----------------------------------------------------
+                        if unsup_method != "Isolation Forest":
+
+                            st.write(
+                                "### 🧭 Group Profiles"
+                            )
+
+                            profile = (
+                                result_df
+                                .groupby("Group")[unsup_features]
+                                .mean()
+                                .round(3)
+                            )
+
+                            st.dataframe(
+                                profile,
+                                use_container_width=True
+                            )
+
+                            profile_z = profile.copy()
+
+                            for col in profile_z.columns:
+                                col_std = profile_z[col].std()
+
+                                if pd.notna(col_std) and col_std != 0:
+                                    profile_z[col] = (
+                                        profile_z[col]
+                                        - profile_z[col].mean()
+                                    ) / col_std
+
+                            fig_profile = px.imshow(
+                                profile_z,
+                                text_auto=".2f",
+                                aspect="auto",
+                                color_continuous_scale="RdBu_r",
+                                title=(
+                                    "Relative Group Profile "
+                                    "(standardized means)"
+                                )
+                            )
+
+                            st.plotly_chart(
+                                fig_profile,
+                                use_container_width=True
+                            )
+
+                        # ----------------------------------------------------
+                        # Evaluation metrics
+                        # ----------------------------------------------------
+                        if unsup_method != "Isolation Forest":
+
+                            with st.expander(
+                                "📏 Clustering Quality Metrics"
+                            ):
+                                metric_data = {
+                                    "Metric": [
+                                        "Silhouette score",
+                                        "Davies-Bouldin score",
+                                        "Calinski-Harabasz score"
+                                    ],
+                                    "Value": [
+                                        metrics["silhouette"],
+                                        metrics["davies_bouldin"],
+                                        metrics["calinski_harabasz"]
+                                    ]
+                                }
+
+                                st.dataframe(
+                                    pd.DataFrame(metric_data),
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
+
+                                st.markdown(
+                                    """
+                                    - **Silhouette:** Higher is generally better.
+                                    - **Davies-Bouldin:** Lower is generally better.
+                                    - **Calinski-Harabasz:** Higher is generally better.
+                                    """
+                                )
+
+                        # ----------------------------------------------------
+                        # Download results
+                        # ----------------------------------------------------
+                        st.write(
+                            "### 📥 Download Discovery Results"
+                        )
+
+                        download_data = result_df.to_csv(
+                            index=False
+                        ).encode("utf-8")
+
+                        st.download_button(
+                            label="Download Results CSV",
+                            data=download_data,
+                            file_name=(
+                                "unsupervised_discovery_results.csv"
+                            ),
+                            mime="text/csv"
+                        )
+
+                    except Exception as error:
+                        st.error(
+                            f"Unsupervised analysis failed: {error}"
+                        )
+
 
 # Footer
 st.markdown("---")
