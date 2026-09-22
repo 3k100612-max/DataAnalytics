@@ -570,10 +570,15 @@ def run_unsupervised_analysis(df, features, method, n_clusters, eps, min_samples
     metrics = {"rows": n_rows, "features": len(features)}
 
     if method == "Isolation Forest":
-        result_df["Status"] = np.where(labels == -1, "Anomaly", "Normal")
+        result_df["Status"] = np.where(
+            labels == -1,
+            "Anomaly",
+            "Normal",
+        )
         metrics["anomalies"] = int((labels == -1).sum())
     else:
-    result_df["Group"] = labels.astype(str)
+        result_df["Group"] = labels.astype(str)
+
 
     unique_labels = [
         str(lbl) for lbl in np.unique(labels)
