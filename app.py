@@ -573,12 +573,38 @@ def run_unsupervised_analysis(df, features, method, n_clusters, eps, min_samples
         result_df["Status"] = np.where(labels == -1, "Anomaly", "Normal")
         metrics["anomalies"] = int((labels == -1).sum())
     else:
-        result_df["Group"] = labels.astype(str)
-        unique_labels = [lbl for lbl in np.unique(labels) if lbl != -1]
-        metrics["groups"] = len(unique_labels)
-        metrics["silhouette"] = None
-        metrics["davies_bouldin"] = None
-        metrics["calinski_harabasz"] = None
+    result_df["Group"] = labels.astype(str)
+
+    unique_labels = [
+        str(lbl) for lbl in np.unique(labels)
+        if lbl != -1
+    ]
+
+    metrics["groups"] = len(unique_labels)
+    metrics["silhouette"] = None
+    metrics["davies_bouldin"] = None
+    metrics["calinski_harabasz"] = None
+
+    # Generate human-readable descriptions for each cluster
+    try:
+        cluster_labels, cluster_profile, cluster_profile_z = create_cluster_labels(
+            result_df=result_df,
+            features=features,
+            group_column="Group",
+        )
+
+        result_df["Group Label"] = result_df["Group"].map(cluster_labels)
+
+        metrics["cluster_labels"] = cluster_labels
+        metrics["cluster_profile"] = cluster_profile
+        metrics["cluster_profile_z"] = cluster_profile_z
+
+    except Exception:
+        result_df["Group Label"] = result_df["Group"]
+        metrics["cluster_labels"] = {}
+        metrics["cluster_profile"] = None
+        metrics["cluster_profile_z"] = None
+
         try:
             mask = labels != -1  # exclude DBSCAN noise from scoring
             if mask.sum() >= 2 and len(set(labels[mask])) >= 2 and len(set(labels[mask])) < mask.sum():
@@ -589,6 +615,69 @@ def run_unsupervised_analysis(df, features, method, n_clusters, eps, min_samples
             pass
 
     return {"result": result_df, "metrics": metrics}
+
+def create_cluster_labels(result_df, features, group_column="Group"):
+    """
+    Creates human-readable labels for clusters based on the selected features.
+
+    Each feature is compared with the overall mean:
+    - High: cluster mean is substantially above the overall mean
+    - Low: cluster mean is substantially below the overall mean
+    - Average: cluster mean is close to the overall mean
+    """
+
+    profile = result_df.groupby(group_column)[features].mean()
+    overall_mean = result_df[features].mean()
+    overall_std = result_df[features].std().replace(0, np.nan)
+
+    # Standardized difference between each cluster mean and the overall mean
+    profile_z = (profile - overall_mean) / overall_std
+    profile_z = profile_z.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    descriptive_labels = {}
+
+    for group in profile_z.index:
+        values = profile_z.loc[group].sort_values()
+
+        high_features = [
+            feature for feature, value in values.items()
+            if value >= 0.50
+        ]
+
+        low_features = [
+            feature for feature, value in values.items()
+            if value <= -0.50
+        ]
+
+        # Use the strongest differences first
+        high_features = high_features[:2]
+        low_features = low_features[:2]
+
+        group_number = str(group)
+
+        if high_features and low_features:
+            label = (
+                f"Group {group_number}: "
+                f"High {', '.join(high_features)}; "
+                f"Low {', '.join(low_features)}"
+            )
+        elif high_features:
+            label = (
+                f"Group {group_number}: "
+                f"High {', '.join(high_features)}"
+            )
+        elif low_features:
+            label = (
+                f"Group {group_number}: "
+                f"Low {', '.join(low_features)}"
+            )
+        else:
+            label = f"Group {group_number}: Average profile"
+
+        descriptive_labels[group_number] = label
+
+    return descriptive_labels, profile, profile_z
+
 
 
 # ----------------------------------------------------------------------------
@@ -1201,6 +1290,7 @@ if uploaded_file:
         st.subheader("🔍 Unsupervised Discovery Laboratory")
         st.info("Unsupervised learning searches for hidden patterns without using a target column. "
                 "It can discover groups and unusual records.")
+      
 
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
@@ -1215,7 +1305,12 @@ if uploaded_file:
                 unsup_features = st.multiselect(
                     "Select numeric features:", numeric_cols,
                     default=numeric_cols[:min(5, len(numeric_cols))])
-
+                if unsup_features:
+                    st.caption(
+                        "The discovered group descriptions will be based on: "
+                        + ", ".join(unsup_features)
+                    )
+                
                 unsup_method = st.selectbox(
                     "Choose method:",
                     ["K-Means Clustering", "Mini-Batch K-Means", "Hierarchical Clustering",
@@ -1262,13 +1357,32 @@ if uploaded_file:
                             m3.metric("Groups found", metrics["groups"])
                             m4.metric("Silhouette", "N/A" if metrics["silhouette"] is None
                                      else f"{metrics['silhouette']:.3f}")
-
+                            
+                        # ---- Human-readable cluster descriptions ----
+                        if unsup_method != "Isolation Forest":
+                            st.write("### 🏷️ Meaning of the Discovered Groups")
+                        
+                            cluster_labels = metrics.get("cluster_labels", {})
+                        
+                            if cluster_labels:
+                                for group_id, description in cluster_labels.items():
+                                    st.write(f"- **{description}**")
+                        
+                                st.caption(
+                                    "These labels are generated from the selected features. "
+                                    "They describe how each group's average feature values differ "
+                                    "from the overall dataset average."
+                                )
+                            
                         # ---- PCA group map ----
                         st.write("### 🗺️ Visual Map of the Discovered Structure")
                         if unsup_method == "Isolation Forest":
-                            color_column, title = "Status", "Normal Rows and Anomalies (PCA Projection)"
+                            color_column = "Status"
+                            title = "Normal Rows and Anomalies (PCA Projection)"
                         else:
-                            color_column, title = "Group", f"{unsup_method} (PCA Projection)"
+                            color_column = "Group Label"
+                            title = f"{unsup_method} by Feature Profile (PCA Projection)"
+
 
                         fig_map = px.scatter(
                             result_df, x="PCA 1", y="PCA 2", color=color_column,
@@ -1315,25 +1429,51 @@ if uploaded_file:
                             st.write("### 📦 Feature Distributions by Group")
                             selected_box_feature = st.selectbox("Choose a feature:", unsup_features,
                                                                 key="unsup_box_feature")
-                            fig_box = px.box(result_df, x="Group", y=selected_box_feature, color="Group",
-                                             points=False, title=f"{selected_box_feature} by group",
-                                             template="plotly_white")
+                            fig_box = px.box(
+                                result_df,
+                                x="Group Label",
+                                y=selected_box_feature,
+                                color="Group Label",
+                                points=False,
+                                title=f"{selected_box_feature} by discovered profile",
+                                template="plotly_white",
+                            )
+                            
+                            fig_box.update_layout(
+                                xaxis_title="Discovered group profile",
+                                yaxis_title=selected_box_feature,
+                            )
+
                             st.plotly_chart(fig_box, use_container_width=True)
 
                             st.write("### 🧭 Group Profiles")
-                            profile = result_df.groupby("Group")[unsup_features].mean().round(3)
-                            st.dataframe(profile, use_container_width=True)
+                            profile = result_df.groupby("Group Label")[unsup_features].mean().round(3)
+                            st.dataframe(
+                                profile,
+                                use_container_width=True
+                            )
 
-                            profile_z = profile.copy()
-                            for col in profile_z.columns:
-                                col_std = profile_z[col].std()
-                                if pd.notna(col_std) and col_std != 0:
-                                    profile_z[col] = (profile_z[col] - profile_z[col].mean()) / col_std
+                            profile_z = metrics.get("cluster_profile_z")
 
-                            fig_profile = px.imshow(profile_z, text_auto=".2f", aspect="auto",
-                                                    color_continuous_scale="RdBu_r",
-                                                    title="Relative Group Profile (standardized means)")
-                            st.plotly_chart(fig_profile, use_container_width=True)
+                            if profile_z is not None:
+                                profile_z = profile_z.copy()
+                            
+                                fig_profile = px.imshow(
+                                    profile_z,
+                                    text_auto=".2f",
+                                    aspect="auto",
+                                    color_continuous_scale="RdBu_r",
+                                    title="Relative Group Profile",
+                                    labels={
+                                        "x": "Selected Features",
+                                        "y": "Discovered Groups",
+                                        "color": "Relative level",
+                                    },
+                                )
+                            
+                                st.plotly_chart(fig_profile, use_container_width=True)
+
+                            
 
                             with st.expander("📏 Clustering Quality Metrics"):
                                 metric_data = {
