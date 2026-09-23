@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 
 import matplotlib.pyplot as plt
@@ -111,6 +112,101 @@ def load_raw(file, rows):
                 df[col] = df[col].astype("int32")
     return df, total_missing
 
+def add_datetime_features(df, dayfirst=False, parse_threshold=0.80):
+    """
+    Detect likely date/time columns and add numeric features for modeling.
+
+    Returns:
+        df_features: copy of df with date/time features added
+        raw_date_cols: original date/time columns detected
+    """
+    df_features = df.copy()
+    raw_date_cols = []
+
+    name_hint = re.compile(r"date|time|timestamp|datetime", re.IGNORECASE)
+    date_pattern = re.compile(r"^\s*\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}")
+
+    for col in df.columns:
+        already_datetime = pd.api.types.is_datetime64_any_dtype(df[col])
+        is_text = (
+            pd.api.types.is_object_dtype(df[col])
+            or pd.api.types.is_string_dtype(df[col])
+        )
+
+        # Do not guess that numeric columns are dates; they might be IDs.
+        if not already_datetime and not is_text:
+            continue
+
+        sample = df[col].dropna()
+        if len(sample) > 500:
+            sample = sample.sample(500, random_state=42)
+
+        if already_datetime:
+            parsed_sample = pd.to_datetime(sample, errors="coerce")
+        else:
+            parsed_sample = pd.to_datetime(
+                sample.astype(str),
+                errors="coerce",
+                dayfirst=dayfirst,
+            )
+
+        parse_rate = parsed_sample.notna().mean() if len(sample) else 0.0
+
+        looks_like_date_text = (
+            is_text
+            and sample.astype(str).str.match(date_pattern).mean() >= parse_threshold
+        )
+
+        # Detect by column name or by recognizable date-formatted values.
+        if not (
+            already_datetime
+            or name_hint.search(str(col))
+            or (looks_like_date_text and parse_rate >= parse_threshold)
+        ):
+            continue
+
+        parsed = pd.to_datetime(
+            df[col],
+            errors="coerce",
+            dayfirst=dayfirst,
+        )
+
+        # Skip the column if too many values could not be parsed.
+        if parsed.notna().mean() < parse_threshold:
+            continue
+
+        raw_date_cols.append(col)
+        prefix = re.sub(r"\W+", "_", str(col)).strip("_") or "date"
+
+        # Calendar features
+        df_features[f"{prefix}_year"] = parsed.dt.year
+        df_features[f"{prefix}_month"] = parsed.dt.month
+        df_features[f"{prefix}_day"] = parsed.dt.day
+        df_features[f"{prefix}_weekday"] = parsed.dt.dayofweek
+        df_features[f"{prefix}_is_weekend"] = (
+            parsed.dt.dayofweek >= 5
+        ).astype("float32")
+
+        # Add time-of-day features if the column contains times.
+        has_time = (
+            parsed.dt.hour.ne(0).any()
+            or parsed.dt.minute.ne(0).any()
+            or parsed.dt.second.ne(0).any()
+        )
+        if has_time:
+            df_features[f"{prefix}_hour"] = parsed.dt.hour
+            df_features[f"{prefix}_minute"] = parsed.dt.minute
+
+        # Cyclical features represent repeating patterns such as months and weekdays.
+        month_angle = 2 * np.pi * (parsed.dt.month - 1) / 12
+        weekday_angle = 2 * np.pi * parsed.dt.dayofweek / 7
+
+        df_features[f"{prefix}_month_sin"] = np.sin(month_angle)
+        df_features[f"{prefix}_month_cos"] = np.cos(month_angle)
+        df_features[f"{prefix}_weekday_sin"] = np.sin(weekday_angle)
+        df_features[f"{prefix}_weekday_cos"] = np.cos(weekday_angle)
+
+    return df_features, raw_date_cols
 
 @st.cache_data
 def fix_missing(df):
@@ -811,8 +907,17 @@ uploaded_file = st.file_uploader("Upload a CSV file to begin the research pipeli
 
 if uploaded_file:
     df_raw, total_missing = load_raw(uploaded_file, row_limit)
+
+    # Create a separate copy with model-ready features derived from date/time columns.
+    # Keep df_raw for the original data, target selector, and dataset summaries.
+    df_model, raw_date_cols = add_datetime_features(
+        df_raw,
+        dayfirst=False,  # Set True if dates look like 31/12/2025.
+    )
+
     df = fix_missing(df_raw)      # imputed copy for exploration + download
     profile = research_profile(df_raw)
+
 
     # =========================================================================
     # STEP 2 — DATASET HEALTH CHECK
@@ -1067,8 +1172,11 @@ if uploaded_file:
                 st.error("Regression needs a numeric target. Switch to Classification, or pick a "
                         "numeric target in Step 7.")
 
-            all_predictors = [c for c in df_raw.columns if c != target]
-            usable, dropped = screen_features(df_raw, all_predictors)
+            all_predictors = [c for c in df_model.columns
+                              if c != target and c not in raw_date_cols
+            ]
+            usable, dropped = screen_features(df_model, all_predictors)
+            
             if dropped:
                 with st.expander(f"🧹 {len(dropped)} column(s) automatically excluded"):
                     for c, why in dropped:
@@ -1114,7 +1222,7 @@ if uploaded_file:
                     st.error("Regression needs a numeric target.")
                 else:
                     try:
-                        work = df_raw.dropna(subset=[target]).copy()
+                        work = df_model.dropna(subset=[target]).copy()
                         class_names = None
 
                         if clf:
