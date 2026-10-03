@@ -15,7 +15,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # ML Imports
-from sklearn.base import clone
+from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.cluster import (
     DBSCAN, AgglomerativeClustering, Birch, KMeans, MiniBatchKMeans,
 )
@@ -994,6 +994,27 @@ def ts_metrics(y, p):
         "MAPE %": float(np.mean(np.abs((y[nz] - p[nz]) / y[nz])) * 100) if nz.any() else np.nan,
         "R²": float(r2_score(y, p)),
     }
+
+
+class BinnedClassifierRegressor(BaseEstimator, RegressorMixin):
+    """Lets classifiers (LDA, Naive Bayes) forecast a number: the target is cut
+    into quantile bins, the classifier predicts bin probabilities, and the
+    forecast is the probability-weighted average of the bin means."""
+
+    def __init__(self, classifier=None, n_bins=10):
+        self.classifier = classifier
+        self.n_bins = n_bins
+
+    def fit(self, X, y):
+        y = np.asarray(y, dtype=float)
+        n_bins = int(max(2, min(self.n_bins, len(y) // 20)))
+        bins = pd.qcut(pd.Series(y), q=n_bins, labels=False, duplicates="drop").values
+        self.model_ = clone(self.classifier).fit(X, bins)
+        self.bin_means_ = np.array([y[bins == c].mean() for c in self.model_.classes_])
+        return self
+
+    def predict(self, X):
+        return self.model_.predict_proba(X) @ self.bin_means_
 
 
 def ts_ml_models():
