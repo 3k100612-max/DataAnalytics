@@ -57,14 +57,36 @@ from sklearn.tree import (
     DecisionTreeClassifier, DecisionTreeRegressor, export_graphviz,
 )
 
-# Time-series statistical models (optional: app still runs without statsmodels)
-try:
+# Time-series statistical models (Holt-Winters, ARIMA, SARIMA need `statsmodels`).
+# If it is missing, the app installs it automatically the first time it runs.
+# The rest of the app still works if the install is blocked.
+SM_INSTALL_ERROR = None
+
+
+def _import_statsmodels():
+    global ExponentialSmoothing, ARIMA, SARIMAX
     from statsmodels.tsa.holtwinters import ExponentialSmoothing
     from statsmodels.tsa.arima.model import ARIMA
     from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+
+try:
+    _import_statsmodels()
     HAS_SM = True
 except ImportError:
     HAS_SM = False
+    try:
+        import importlib
+        import subprocess
+        import sys
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "--quiet", "statsmodels"],
+            stdout=subprocess.DEVNULL)
+        importlib.invalidate_caches()
+        _import_statsmodels()
+        HAS_SM = True
+    except Exception as _err:           # no internet, no permission, etc.
+        SM_INSTALL_ERROR = str(_err)[:200]
 
 # ----------------------------------------------------------------------------
 # CONSTANTS
@@ -1249,7 +1271,9 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
         options = available_ts_models(int(season))
         chosen = st.multiselect("Algorithms to compare:", options, default=options)
         if not HAS_SM:
-            st.caption("ℹ️ Install `statsmodels` to unlock Holt-Winters, ARIMA and SARIMA.")
+            st.caption("ℹ️ Holt-Winters, ARIMA and SARIMA are unavailable because `statsmodels` could not be "
+                       "installed automatically. Run `pip install statsmodels` in the app's environment "
+                       "and restart." + (f" (Details: {SM_INSTALL_ERROR})" if SM_INSTALL_ERROR else ""))
 
         run = st.button("🚀 Train & Forecast", type="primary", key="ts_run")
         if run:
