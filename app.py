@@ -998,12 +998,24 @@ def ts_metrics(y, p):
 
 def ts_ml_models():
     """Machine-learning forecasters that learn from lagged values."""
+    scaled = lambda m: Pipeline([("sc", StandardScaler()), ("m", m)])
+    scaled_y = lambda m: TransformedTargetRegressor(regressor=scaled(m), transformer=StandardScaler())
     return {
-        "Ridge (lags)": Pipeline([("sc", StandardScaler()), ("m", Ridge(alpha=1.0))]),
+        "Linear/Logistic Regression (lags)": scaled(LinearRegression()),
+        "Linear Discriminant Analysis (lags)": scaled(BinnedClassifierRegressor(LinearDiscriminantAnalysis())),
+        "Decision Tree (lags)": DecisionTreeRegressor(max_depth=7, min_samples_leaf=5, random_state=SEED),
+        "Naive Bayes (lags)": scaled(BinnedClassifierRegressor(GaussianNB())),
+        "KNN (lags)": scaled(KNeighborsRegressor(n_neighbors=5, weights="distance")),
+        "SVM (lags)": scaled_y(SVR(C=5, epsilon=0.1)),
         "Random Forest (lags)": RandomForestRegressor(n_estimators=200, random_state=SEED, n_jobs=1),
         "Extra Trees (lags)": ExtraTreesRegressor(n_estimators=200, random_state=SEED, n_jobs=1),
         "Gradient Boosting (lags)": GradientBoostingRegressor(random_state=SEED),
         "HistGradient Boosting (lags)": HistGradientBoostingRegressor(random_state=SEED),
+        "AdaBoost (lags)": AdaBoostRegressor(n_estimators=100, random_state=SEED),
+        "Neural Network (lags)": scaled_y(
+            MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500,
+                         early_stopping=True, random_state=SEED)),
+        "Ridge (lags)": scaled(Ridge(alpha=1.0)),
     }
 
 
