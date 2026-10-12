@@ -1019,7 +1019,7 @@ def render_algorithm_visualization(algo_name, pipe, X_test, y_test, res):
         elif algo_name == "Extra Trees":
 
             depths [
-                tree.tree_.max_depth,
+                tree_.max_depth
                 for tree in model.estimators_
             ]
 
