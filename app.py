@@ -944,7 +944,7 @@ def render_algorithm_visualization(algo_name, pipe, X_test, y_test, res):
                 "PC2": coords[:, 1]
             })
 
-            if res["class_names"\]:
+            if res["class_names"]:
                 plot_df["Class"] = [
                     res["class_names"][i]
                     for i in y_test
