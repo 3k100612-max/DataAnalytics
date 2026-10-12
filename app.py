@@ -847,7 +847,7 @@ def render_algorithm_visualization(algo_name, pipe, X_test, y_test, res):
         # ---------------------------------------------------------
         # Linear / Logistic Regression
         # ---------------------------------------------------------
-        if algo_name in ["Linear/Logistic Regression"\]:
+        if algo_name in ["Linear/Logistic Regression"]:
 
             if hasattr(model, "coef_"):
 
