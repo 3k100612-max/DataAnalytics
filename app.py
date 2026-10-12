@@ -831,11 +831,330 @@ def explain_algo(algo_r):
             else:
                 st.write("Grows many decision trees on random slices of the data and lets them vote. "
                          "One tree can be fooled; a crowd of different trees rarely is.")
-    elif algo_r == "Neural Network":
+    elif algo_r in ["Neural Network", "MLPClassifier", "MLPRegressor"]:
         with st.expander("🔍 The 'Layered Weights' Logic", expanded=True):
             st.write("Passes the clues through layers of weighted connections, learning curved "
                      "(non-linear) patterns that straight-line models miss.")
+            
+def render_algorithm_visualization(algo_name, pipe, X_test, y_test, res):
+    """
+    Educational algorithm visualization.
+    """
 
+    try:
+        model = pipe.named_steps["model"]
+
+        # ---------------------------------------------------------
+        # Linear / Logistic Regression
+        # ---------------------------------------------------------
+        if algo_name in ["Linear/Logistic Regression"\]:
+
+            if hasattr(model, "coef_"):
+
+                coef = (
+                    model.coef_[0]
+                    if len(model.coef_.shape) > 1
+                    else model.coef_
+                )
+
+                features = feature_names_of(pipe)
+
+                coef_df = pd.DataFrame({
+                    "Feature": features[:len(coef)],
+                    "Coefficient": coef
+                }).sort_values("Coefficient")
+
+                fig = px.bar(
+                    coef_df,
+                    x="Coefficient",
+                    y="Feature",
+                    orientation="h",
+                    title="Feature Weight Importance",
+                    color="Coefficient",
+                    color_continuous_scale="RdBu"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------------------------------------------------
+        # Linear Discriminant Analysis
+        # ---------------------------------------------------------
+        elif algo_name == "Linear Discriminant Analysis":
+
+            X_prepared = pipe.named_steps["prep"].transform(X_test)
+
+            X_lda = model.transform(X_prepared)
+
+            plot_df = pd.DataFrame({
+                "LDA1": X_lda[:, 0],
+                "Class": [
+                    res["class_names"][i]
+                    for i in y_test
+                ]
+            })
+
+            fig = px.strip(
+                plot_df,
+                x="LDA1",
+                color="Class",
+                title="LDA Class Separation"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------------------------------------------------
+        # Naive Bayes
+        # ---------------------------------------------------------
+        elif algo_name == "Naive Bayes":
+
+            if hasattr(model, "theta_"):
+
+                features = feature_names_of(pipe)
+
+                fig = go.Figure()
+
+                for idx, cls in enumerate(res["class_names"]):
+
+                    fig.add_trace(
+                        go.Bar(
+                            x=features[:len(model.theta_[idx])],
+                            y=model.theta_[idx],
+                            name=str(cls)
+                        )
+                    )
+
+                fig.update_layout(
+                    barmode="group",
+                    title="Mean Feature Values Per Class"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------------------------------------------------
+        # KNN
+        # ---------------------------------------------------------
+        elif algo_name == "KNN":
+
+            X_vis = pipe.named_steps["prep"].transform(X_test)
+
+            coords = PCA(n_components=2).fit_transform(X_vis)
+
+            plot_df = pd.DataFrame({
+                "PC1": coords[:, 0],
+                "PC2": coords[:, 1]
+            })
+
+            if res["class_names"\]:
+                plot_df["Class"] = [
+                    res["class_names"][i]
+                    for i in y_test
+                ]
+
+                fig = px.scatter(
+                    plot_df,
+                    x="PC1",
+                    y="PC2",
+                    color="Class",
+                    title="KNN Neighbor Space"
+                )
+            else:
+                fig = px.scatter(
+                    plot_df,
+                    x="PC1",
+                    y="PC2",
+                    title="KNN Neighbor Space"
+                )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------------------------------------------------
+        # SVM
+        # ---------------------------------------------------------
+        elif algo_name == "SVM":
+
+            if hasattr(model, "support_"):
+                st.metric(
+                    "Support Vectors",
+                    len(model.support_)
+                )
+
+            X_vis = pipe.named_steps["prep"].transform(X_test)
+
+            coords = PCA(n_components=2).fit_transform(X_vis)
+
+            fig = px.scatter(
+                x=coords[:, 0],
+                y=coords[:, 1],
+                title="SVM Feature Space Projection"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------------------------------------------------
+        # Random Forest
+        # ---------------------------------------------------------
+        elif algo_name == "Random Forest":
+
+            depths = [
+                tree.tree_.max_depth
+                for tree in model.estimators_
+            ]
+
+            fig = px.histogram(
+                x=depths,
+                nbins=20,
+                title="Forest Tree Depth Distribution"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.metric(
+                "Trees Built",
+                len(model.estimators_)
+            )
+
+        # ---------------------------------------------------------
+        # Extra Trees
+        # ---------------------------------------------------------
+        elif algo_name == "Extra Trees":
+
+            depths [
+                tree.tree_.max_depth
+                for tree in model.estimators_
+            ]
+
+            fig = px.histogram(
+                x=depths,
+                nbins=20,
+                title="Extra Trees Tree Depth Distribution"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.metric(
+                "Trees Built",
+                len(model.estimators_)
+            )
+
+        # ---------------------------------------------------------
+        # Gradient Boosting
+        # ---------------------------------------------------------
+        elif algo_name == "Gradient Boosting":
+
+            try:
+
+                X_prep = pipe.named_steps["prep"].transform(X_test)
+
+                scores = []
+
+                for pred in model.staged_predict(X_prep):
+
+                    if res["task"].startswith("Classification"):
+                        scores.append(
+                            accuracy_score(y_test, pred)
+                        )
+                    else:
+                        scores.append(
+                            r2_score(y_test, pred)
+                        )
+
+                fig = px.line(
+                    y=scores,
+                    markers=True,
+                    title="Boosting Improvement by Stage"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+            except Exception:
+                pass
+
+        # ---------------------------------------------------------
+        # HistGradient Boosting
+        # ---------------------------------------------------------
+        elif algo_name == "HistGradient Boosting":
+
+            numeric_cols = X_test.select_dtypes(
+                include=np.number
+            ).columns.tolist()
+
+            if numeric_cols:
+
+                fig = px.histogram(
+                    X_test,
+                    x=numeric_cols[0],
+                    nbins=40,
+                    title="Histogram Binning Example"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------------------------------------------------
+        # AdaBoost
+        # ---------------------------------------------------------
+        elif algo_name == "AdaBoost":
+
+            if hasattr(model, "estimator_weights_"):
+
+                fig = px.line(
+                    y=model.estimator_weights_,
+                    markers=True,
+                    title="Estimator Importance Through Boosting"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------------------------------------------------
+        # Neural Network
+        # ---------------------------------------------------------
+        elif algo_name == "Neural Network":
+
+            if hasattr(model, "loss_curve_"):
+
+                fig = px.line(
+                    y=model.loss_curve_,
+                    title="Neural Network Learning Curve"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+            hidden = model.hidden_layer_sizes
+
+            if isinstance(hidden, int):
+                hidden = [hidden]
+
+            layers = [len(feature_names_of(pipe))]
+            layers.extend(hidden)
+
+            if res["class_names"]:
+                layers.append(len(res["class_names"]))
+            else:
+                layers.append(1)
+
+            nodes = []
+
+            for layer_idx, count in enumerate(layers):
+
+                for node in range(count):
+
+                    nodes.append({
+                        "Layer": layer_idx,
+                        "Node": node
+                    })
+
+            vis_df = pd.DataFrame(nodes)
+
+            fig = px.scatter(
+                vis_df,
+                x="Layer",
+                y="Node",
+                title="Neural Network Architecture"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        st.warning(f"Visualization unavailable: {e}")
 
 # ----------------------------------------------------------------------------
 # 5. UNSUPERVISED HELPERS
@@ -2082,6 +2401,13 @@ if uploaded_file:
                 st.write("## 1️⃣2️⃣ Research Interpretation")
                 st.write(f"### {res['algo']} — How It Reasons")
                 algo_r = res['algo']
+                render_algorithm_visualization(
+                    algo_r,
+                    pipe,
+                    res["X_test"],
+                    y_test,
+                    res
+                )
                 if algo_r == "Decision Tree":
                     render_tree(pipe, res['class_names'])
                 else:
