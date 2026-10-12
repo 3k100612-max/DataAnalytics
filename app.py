@@ -101,6 +101,11 @@ TARGET_SCORE = 0.80         # quality gate shown to the user
 EXCELLENT_SCORE = min(0.95, TARGET_SCORE + 0.10)
 AUTO = "🏆 Auto-Compare All (Recommended)"
 
+# Unsupervised: row caps for methods that scale badly (random sample is used above the cap)
+UNSUP_CAP_ROWS = {"Hierarchical Clustering": 10000, "DBSCAN Clustering": 50000,
+                  "Gaussian Mixture Clustering": 100000, "Birch Clustering": 200000}
+SILHOUETTE_SAMPLE = 10000   # silhouette is O(n^2); score on a sample for big data
+
 # Time-series constants
 MAX_TS_ROWS = 20000         # keep only the most recent points (keeps lag models fast)
 MIN_TS_ROWS = 40            # below this a forecast is not trustworthy
@@ -153,6 +158,14 @@ def load_raw(file, rows):
                 df[col] = df[col].astype("int32")
     return df, total_missing
 
+
+def _to_datetime_quiet(values, dayfirst=False):
+    """pd.to_datetime that never raises and hides pandas' format-inference warnings."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return pd.to_datetime(values, errors="coerce", dayfirst=dayfirst)
+
+
 def add_datetime_features(df, dayfirst=False, parse_threshold=0.80):
     """
     Detect likely date/time columns and add numeric features for modeling.
@@ -183,18 +196,15 @@ def add_datetime_features(df, dayfirst=False, parse_threshold=0.80):
             sample = sample.sample(500, random_state=42)
 
         if already_datetime:
-            parsed_sample = pd.to_datetime(sample, errors="coerce")
+            parsed_sample = _to_datetime_quiet(sample)
         else:
-            parsed_sample = pd.to_datetime(
-                sample.astype(str),
-                errors="coerce",
-                dayfirst=dayfirst,
-            )
+            parsed_sample = _to_datetime_quiet(sample.astype(str), dayfirst=dayfirst)
 
         parse_rate = parsed_sample.notna().mean() if len(sample) else 0.0
 
         looks_like_date_text = (
             is_text
+            and len(sample) > 0
             and sample.astype(str).str.match(date_pattern).mean() >= parse_threshold
         )
 
@@ -206,11 +216,7 @@ def add_datetime_features(df, dayfirst=False, parse_threshold=0.80):
         ):
             continue
 
-        parsed = pd.to_datetime(
-            df[col],
-            errors="coerce",
-            dayfirst=dayfirst,
-        )
+        parsed = _to_datetime_quiet(df[col], dayfirst=dayfirst)
 
         # Skip the column if too many values could not be parsed.
         if parsed.notna().mean() < parse_threshold:
@@ -248,6 +254,7 @@ def add_datetime_features(df, dayfirst=False, parse_threshold=0.80):
         df_features[f"{prefix}_weekday_cos"] = np.cos(weekday_angle)
 
     return df_features, raw_date_cols
+
 
 @st.cache_data
 def fix_missing(df):
@@ -377,6 +384,8 @@ def build_methodology_report(res, mode_label, target=None, mode_extra=None):
             "## Discovery Summary",
         ]
         m = mode_extra.get("metrics", {})
+        if m.get("sampled"):
+            lines.append(f"- Note: a random sample of {m['rows']:,} rows was analyzed (method is too slow on the full data).")
         for key, label in [("groups", "Groups found"), ("anomalies", "Anomalies found"),
                            ("silhouette", "Silhouette score"), ("davies_bouldin", "Davies-Bouldin score"),
                            ("calinski_harabasz", "Calinski-Harabasz score")]:
@@ -736,7 +745,7 @@ def train_and_compare(X, y, clf, algos, tune, manual_depth, on_progress):
         lc_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=SEED) if clf else KFold(n_splits=3, shuffle=True, random_state=SEED)
         train_sizes, train_scores, test_scores = learning_curve(
             lc_pipe, lc_X, lc_y, cv=lc_cv, scoring=scoring, n_jobs=2,
-            train_sizes=np.linspace(0.2, 1.0, 5), random_state=SEED)
+            train_sizes=np.linspace(0.2, 1.0, 5), shuffle=True, random_state=SEED)
         learning_curve_data = pd.DataFrame({
             "Training rows": train_sizes,
             "Train score": train_scores.mean(axis=1),
@@ -835,326 +844,143 @@ def explain_algo(algo_r):
         with st.expander("🔍 The 'Layered Weights' Logic", expanded=True):
             st.write("Passes the clues through layers of weighted connections, learning curved "
                      "(non-linear) patterns that straight-line models miss.")
-            
-def render_algorithm_visualization(algo_name, pipe, X_test, y_test, res):
-    """
-    Educational algorithm visualization.
-    """
 
+
+def render_algorithm_visualization(algo_name, pipe, X_test, y_test, res):
+    """Educational algorithm visualization (each one wrapped so a failure never breaks the app)."""
     try:
         model = pipe.named_steps["model"]
+        class_names = res.get("class_names")
+        is_class_task = is_clf(res["task"])
 
-        # ---------------------------------------------------------
-        # Linear / Logistic Regression
-        # ---------------------------------------------------------
-        if algo_name in ["Linear/Logistic Regression"]:
-
+        # ---- Linear family: coefficient bar chart ---------------------------------
+        if algo_name in ("Linear/Logistic Regression", "Linear Regression",
+                         "Ridge Regression", "Lasso Regression", "Elastic Net"):
             if hasattr(model, "coef_"):
-
-                coef = (
-                    model.coef_[0]
-                    if len(model.coef_.shape) > 1
-                    else model.coef_
-                )
-
+                coef = np.asarray(model.coef_)
+                note = "Feature Weights"
+                if coef.ndim > 1 and coef.shape[0] > 1:
+                    coef = np.abs(coef).mean(axis=0)          # multi-class: average strength
+                    note = "Average Absolute Feature Weight (all classes)"
+                else:
+                    coef = coef.ravel()
                 features = feature_names_of(pipe)
-
-                coef_df = pd.DataFrame({
-                    "Feature": features[:len(coef)],
-                    "Coefficient": coef
-                }).sort_values("Coefficient")
-
-                fig = px.bar(
-                    coef_df,
-                    x="Coefficient",
-                    y="Feature",
-                    orientation="h",
-                    title="Feature Weight Importance",
-                    color="Coefficient",
-                    color_continuous_scale="RdBu"
-                )
-
+                coef_df = pd.DataFrame({"Feature": features[:len(coef)], "Coefficient": coef})
+                coef_df = coef_df.reindex(coef_df["Coefficient"].abs().sort_values().index).tail(25)
+                fig = px.bar(coef_df, x="Coefficient", y="Feature", orientation="h",
+                             title=note, color="Coefficient", color_continuous_scale="RdBu")
                 st.plotly_chart(fig, use_container_width=True)
 
-        # ---------------------------------------------------------
-        # Linear Discriminant Analysis
-        # ---------------------------------------------------------
+        # ---- LDA -----------------------------------------------------------------
         elif algo_name == "Linear Discriminant Analysis":
-
             X_prepared = pipe.named_steps["prep"].transform(X_test)
-
             X_lda = model.transform(X_prepared)
-
-            plot_df = pd.DataFrame({
-                "LDA1": X_lda[:, 0],
-                "Class": [
-                    res["class_names"][i]
-                    for i in y_test
-                ]
-            })
-
-            fig = px.strip(
-                plot_df,
-                x="LDA1",
-                color="Class",
-                title="LDA Class Separation"
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-
-        # ---------------------------------------------------------
-        # Naive Bayes
-        # ---------------------------------------------------------
-        elif algo_name == "Naive Bayes":
-
-            if hasattr(model, "theta_"):
-
-                features = feature_names_of(pipe)
-
-                fig = go.Figure()
-
-                for idx, cls in enumerate(res["class_names"]):
-
-                    fig.add_trace(
-                        go.Bar(
-                            x=features[:len(model.theta_[idx])],
-                            y=model.theta_[idx],
-                            name=str(cls)
-                        )
-                    )
-
-                fig.update_layout(
-                    barmode="group",
-                    title="Mean Feature Values Per Class"
-                )
-
-                st.plotly_chart(fig, use_container_width=True)
-
-        # ---------------------------------------------------------
-        # KNN
-        # ---------------------------------------------------------
-        elif algo_name == "KNN":
-
-            X_vis = pipe.named_steps["prep"].transform(X_test)
-
-            coords = PCA(n_components=2).fit_transform(X_vis)
-
-            plot_df = pd.DataFrame({
-                "PC1": coords[:, 0],
-                "PC2": coords[:, 1]
-            })
-
-            if res["class_names"]:
-                plot_df["Class"] = [
-                    res["class_names"][i]
-                    for i in y_test
-                ]
-
-                fig = px.scatter(
-                    plot_df,
-                    x="PC1",
-                    y="PC2",
-                    color="Class",
-                    title="KNN Neighbor Space"
-                )
+            plot_df = pd.DataFrame({"LDA1": X_lda[:, 0],
+                                    "Class": [class_names[i] for i in y_test]})
+            if X_lda.shape[1] > 1:
+                plot_df["LDA2"] = X_lda[:, 1]
+                fig = px.scatter(plot_df, x="LDA1", y="LDA2", color="Class", title="LDA Class Separation")
             else:
-                fig = px.scatter(
-                    plot_df,
-                    x="PC1",
-                    y="PC2",
-                    title="KNN Neighbor Space"
-                )
-
+                fig = px.strip(plot_df, x="LDA1", color="Class", title="LDA Class Separation")
             st.plotly_chart(fig, use_container_width=True)
 
-        # ---------------------------------------------------------
-        # SVM
-        # ---------------------------------------------------------
-        elif algo_name == "SVM":
+        # ---- Naive Bayes ---------------------------------------------------------
+        elif algo_name == "Naive Bayes":
+            if hasattr(model, "theta_"):
+                features = feature_names_of(pipe)
+                fig = go.Figure()
+                for idx, cls in enumerate(class_names):
+                    fig.add_trace(go.Bar(x=features[:len(model.theta_[idx])],
+                                         y=model.theta_[idx], name=str(cls)))
+                fig.update_layout(barmode="group", title="Mean Feature Values Per Class (standardized)")
+                st.plotly_chart(fig, use_container_width=True)
 
-            if hasattr(model, "support_"):
-                st.metric(
-                    "Support Vectors",
-                    len(model.support_)
-                )
-
+        # ---- KNN -----------------------------------------------------------------
+        elif algo_name == "KNN":
             X_vis = pipe.named_steps["prep"].transform(X_test)
-
-            coords = PCA(n_components=2).fit_transform(X_vis)
-
-            fig = px.scatter(
-                x=coords[:, 0],
-                y=coords[:, 1],
-                title="SVM Feature Space Projection"
-            )
-
+            coords = PCA(n_components=2, random_state=SEED).fit_transform(X_vis)
+            plot_df = pd.DataFrame({"PC1": coords[:, 0], "PC2": coords[:, 1]})
+            if is_class_task and class_names:
+                plot_df["Class"] = [class_names[i] for i in y_test]
+                fig = px.scatter(plot_df, x="PC1", y="PC2", color="Class", title="KNN Neighbor Space")
+            else:
+                plot_df["Actual"] = np.asarray(y_test)
+                fig = px.scatter(plot_df, x="PC1", y="PC2", color="Actual", title="KNN Neighbor Space")
             st.plotly_chart(fig, use_container_width=True)
 
-        # ---------------------------------------------------------
-        # Random Forest
-        # ---------------------------------------------------------
-        elif algo_name == "Random Forest":
-
-            depths = [
-                tree_.max_depth,
-                for tree in model.estimators_
-            ]
-
-            fig = px.histogram(
-                x=depths,
-                nbins=20,
-                title="Forest Tree Depth Distribution"
-            )
-
+        # ---- SVM -----------------------------------------------------------------
+        elif algo_name == "SVM":
+            inner = getattr(model, "regressor_", model)       # regression wraps SVR
+            if hasattr(inner, "support_"):
+                st.metric("Support Vectors", len(inner.support_))
+            X_vis = pipe.named_steps["prep"].transform(X_test)
+            coords = PCA(n_components=2, random_state=SEED).fit_transform(X_vis)
+            fig = px.scatter(x=coords[:, 0], y=coords[:, 1], title="SVM Feature Space Projection",
+                             labels={"x": "PC1", "y": "PC2"})
             st.plotly_chart(fig, use_container_width=True)
 
-            st.metric(
-                "Trees Built",
-                len(model.estimators_)
-            )
-
-        # ---------------------------------------------------------
-        # Extra Trees
-        # ---------------------------------------------------------
-        elif algo_name == "Extra Trees":
-
-            depths [
-                tree_.max_depth
-                for tree in model.estimators_
-            ]
-
-            fig = px.histogram(
-                x=depths,
-                nbins=20,
-                title="Extra Trees Tree Depth Distribution"
-            )
-
+        # ---- Random Forest / Extra Trees ----------------------------------------
+        elif algo_name in ("Random Forest", "Extra Trees"):
+            depths = [t.tree_.max_depth for t in model.estimators_]
+            fig = px.histogram(x=depths, nbins=20, title=f"{algo_name} — Tree Depth Distribution",
+                               labels={"x": "Tree depth"})
             st.plotly_chart(fig, use_container_width=True)
+            st.metric("Trees Built", len(model.estimators_))
 
-            st.metric(
-                "Trees Built",
-                len(model.estimators_)
-            )
-
-        # ---------------------------------------------------------
-        # Gradient Boosting
-        # ---------------------------------------------------------
+        # ---- Gradient Boosting ---------------------------------------------------
         elif algo_name == "Gradient Boosting":
+            X_prep = pipe.named_steps["prep"].transform(X_test)
+            scores = []
+            for pred in model.staged_predict(X_prep):
+                scores.append(accuracy_score(y_test, pred) if is_class_task else r2_score(y_test, pred))
+            fig = px.line(y=scores, markers=True, title="Boosting Improvement by Stage",
+                          labels={"x": "Boosting stage", "y": "Accuracy" if is_class_task else "R²"})
+            st.plotly_chart(fig, use_container_width=True)
 
-            try:
-
-                X_prep = pipe.named_steps["prep"].transform(X_test)
-
-                scores = []
-
-                for pred in model.staged_predict(X_prep):
-
-                    if res["task"].startswith("Classification"):
-                        scores.append(
-                            accuracy_score(y_test, pred)
-                        )
-                    else:
-                        scores.append(
-                            r2_score(y_test, pred)
-                        )
-
-                fig = px.line(
-                    y=scores,
-                    markers=True,
-                    title="Boosting Improvement by Stage"
-                )
-
-                st.plotly_chart(fig, use_container_width=True)
-
-            except Exception:
-                pass
-
-        # ---------------------------------------------------------
-        # HistGradient Boosting
-        # ---------------------------------------------------------
+        # ---- HistGradient Boosting ----------------------------------------------
         elif algo_name == "HistGradient Boosting":
-
-            numeric_cols = X_test.select_dtypes(
-                include=np.number
-            ).columns.tolist()
-
+            numeric_cols = X_test.select_dtypes(include=np.number).columns.tolist()
             if numeric_cols:
-
-                fig = px.histogram(
-                    X_test,
-                    x=numeric_cols[0],
-                    nbins=40,
-                    title="Histogram Binning Example"
-                )
-
+                fig = px.histogram(X_test, x=numeric_cols[0], nbins=40,
+                                   title=f"Histogram Binning Example ({numeric_cols[0]})")
                 st.plotly_chart(fig, use_container_width=True)
 
-        # ---------------------------------------------------------
-        # AdaBoost
-        # ---------------------------------------------------------
+        # ---- AdaBoost ------------------------------------------------------------
         elif algo_name == "AdaBoost":
-
             if hasattr(model, "estimator_weights_"):
-
-                fig = px.line(
-                    y=model.estimator_weights_,
-                    markers=True,
-                    title="Estimator Importance Through Boosting"
-                )
-
+                fig = px.line(y=model.estimator_weights_, markers=True,
+                              title="Estimator Weight Through Boosting",
+                              labels={"x": "Estimator", "y": "Weight"})
                 st.plotly_chart(fig, use_container_width=True)
 
-        # ---------------------------------------------------------
-        # Neural Network
-        # ---------------------------------------------------------
+        # ---- Neural Network ------------------------------------------------------
         elif algo_name == "Neural Network":
-
             if hasattr(model, "loss_curve_"):
-
-                fig = px.line(
-                    y=model.loss_curve_,
-                    title="Neural Network Learning Curve"
-                )
-
+                fig = px.line(y=model.loss_curve_, title="Neural Network Learning Curve",
+                              labels={"x": "Iteration", "y": "Loss"})
                 st.plotly_chart(fig, use_container_width=True)
 
             hidden = model.hidden_layer_sizes
-
-            if isinstance(hidden, int):
-                hidden = [hidden]
-
-            layers = [len(feature_names_of(pipe))]
-            layers.extend(hidden)
-
-            if res["class_names"]:
-                layers.append(len(res["class_names"]))
-            else:
-                layers.append(1)
-
+            hidden = [hidden] if isinstance(hidden, int) else list(hidden)
+            n_out = len(class_names) if (is_class_task and class_names and len(class_names) > 2) else 1
+            layers = [len(feature_names_of(pipe))] + hidden + [n_out]
+            show_cap = 20                                    # keep the drawing readable
             nodes = []
-
             for layer_idx, count in enumerate(layers):
-
-                for node in range(count):
-
-                    nodes.append({
-                        "Layer": layer_idx,
-                        "Node": node
-                    })
-
+                shown = min(count, show_cap)
+                for node in range(shown):
+                    nodes.append({"Layer": layer_idx, "Node": node - shown / 2})
             vis_df = pd.DataFrame(nodes)
-
-            fig = px.scatter(
-                vis_df,
-                x="Layer",
-                y="Node",
-                title="Neural Network Architecture"
-            )
-
+            fig = px.scatter(vis_df, x="Layer", y="Node", title="Neural Network Architecture",
+                             labels={"Layer": "Layer (0 = inputs, last = output)", "Node": ""})
+            fig.update_yaxes(showticklabels=False)
             st.plotly_chart(fig, use_container_width=True)
+            st.caption("Layer sizes: " + " → ".join(str(c) for c in layers)
+                       + " (at most 20 nodes per layer are drawn).")
 
     except Exception as e:
         st.warning(f"Visualization unavailable: {e}")
+
 
 # ----------------------------------------------------------------------------
 # 5. UNSUPERVISED HELPERS
@@ -1196,6 +1022,13 @@ def run_unsupervised_analysis(df, features, method, n_clusters, eps, min_samples
     data = data.replace([np.inf, -np.inf], np.nan)
     data = data.fillna(data.median(numeric_only=True))
 
+    # Some methods are O(n^2) in memory/time; analyze a random sample above the cap.
+    sampled = False
+    cap = UNSUP_CAP_ROWS.get(method)
+    if cap is not None and len(data) > cap:
+        data = data.sample(cap, random_state=random_state).sort_index()
+        sampled = True
+
     X = StandardScaler().fit_transform(data) if scale_features else data.to_numpy()
     n_rows = len(data)
 
@@ -1225,11 +1058,11 @@ def run_unsupervised_analysis(df, features, method, n_clusters, eps, min_samples
         coords = np.hstack([coords, np.zeros((coords.shape[0], 1))])
 
     result_df = data.copy()
-    result_df["Row"] = np.arange(n_rows)
+    result_df["Row"] = data.index.to_numpy()          # original row number in the dataset
     result_df["PCA 1"] = coords[:, 0]
     result_df["PCA 2"] = coords[:, 1]
 
-    metrics = {"rows": n_rows, "features": len(features)}
+    metrics = {"rows": n_rows, "features": len(features), "sampled": sampled}
 
     if method == "Isolation Forest":
         result_df["Status"] = np.where(labels == -1, "Anomaly", "Normal")
@@ -1248,7 +1081,9 @@ def run_unsupervised_analysis(df, features, method, n_clusters, eps, min_samples
     try:
         mask = labels != -1  # exclude DBSCAN noise from scoring
         if mask.sum() >= 2 and 2 <= len(set(labels[mask])) < mask.sum():
-            metrics["silhouette"] = float(silhouette_score(X[mask], labels[mask]))
+            sil_n = SILHOUETTE_SAMPLE if mask.sum() > SILHOUETTE_SAMPLE else None
+            metrics["silhouette"] = float(silhouette_score(
+                X[mask], labels[mask], sample_size=sil_n, random_state=random_state))
             metrics["davies_bouldin"] = float(davies_bouldin_score(X[mask], labels[mask]))
             metrics["calinski_harabasz"] = float(calinski_harabasz_score(X[mask], labels[mask]))
     except Exception:
@@ -1294,7 +1129,7 @@ def prepare_series(df, date_col, value_col, freq_label):
     """Turn two columns into a clean, evenly spaced, gap-free time series.
     Rows sharing a period are averaged; empty periods are interpolated."""
     d = df[[date_col, value_col]].copy()
-    d[date_col] = pd.to_datetime(d[date_col], errors="coerce")
+    d[date_col] = _to_datetime_quiet(d[date_col])
     d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
     d = d.dropna(subset=[date_col]).sort_values(date_col)
     if d.empty:
@@ -1306,7 +1141,7 @@ def prepare_series(df, date_col, value_col, freq_label):
         freq = pd.infer_freq(idx) if len(idx) >= 3 else None
         if freq is None:                       # irregular -> use the typical gap
             gap = pd.Series(idx).diff().median()
-            if gap <= pd.Timedelta(hours=1):
+            if pd.isna(gap) or gap <= pd.Timedelta(hours=1):
                 freq = "h"
             elif gap <= pd.Timedelta(days=1):
                 freq = "D"
@@ -1782,7 +1617,6 @@ if uploaded_file:
     df = fix_missing(df_raw)      # imputed copy for exploration + download
     profile = research_profile(df_raw)
 
-
     # =========================================================================
     # STEP 2 — DATASET HEALTH CHECK
     # =========================================================================
@@ -2005,8 +1839,9 @@ if uploaded_file:
 
                 if len(num_cols) > 1:
                     upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape, dtype=bool), k=1)).stack()
-                    pair = upper.abs().sort_values(ascending=False).index[0]
-                    st.success(f"**Insight:** Strongest relationship found between **{pair[0]}** and **{pair[1]}** ({corr_matrix.loc[pair]:.2f}).")
+                    if len(upper):
+                        pair = upper.abs().sort_values(ascending=False).index[0]
+                        st.success(f"**Insight:** Strongest relationship found between **{pair[0]}** and **{pair[1]}** ({corr_matrix.loc[pair]:.2f}).")
 
     # =========================================================================
     # STEP 9 — SUPERVISED, UNSUPERVISED OR TIME SERIES ANALYSIS
@@ -2046,10 +1881,9 @@ if uploaded_file:
                         "numeric target in Step 7.")
 
             all_predictors = [c for c in df_model.columns
-                              if c != target and c not in raw_date_cols
-            ]
+                              if c != target and c not in raw_date_cols]
             usable, dropped = screen_features(df_model, all_predictors)
-            
+
             if dropped:
                 with st.expander(f"🧹 {len(dropped)} column(s) automatically excluded"):
                     for c, why in dropped:
@@ -2063,7 +1897,8 @@ if uploaded_file:
                 ordered = usable
                 if st.checkbox("Rank clues by relevance?", value=True) and usable:
                     try:
-                        mi = rank_predictors(df_raw, target, usable, clf)
+                        # df_model (not df_raw): it also contains the derived date features
+                        mi = rank_predictors(df_model, target, usable, clf)
                         ordered = mi.index.tolist()
                         st.caption(f"💡 Best Clue: **{ordered[0]}**")
                     except Exception:
@@ -2202,7 +2037,9 @@ if uploaded_file:
                 else:
                     test_main = r2_score(y_test, preds)
                     score_name = "R²"
-                gap = float(lb.iloc[0]["Overfit gap"]) if len(lb) else 0.0
+                # Overfit gap of the WINNING algorithm (looked up by name, not by row position)
+                winner_row = lb[lb["Algorithm"] == res['algo']]
+                gap = float(winner_row.iloc[0]["Overfit gap"]) if len(winner_row) else 0.0
 
                 sc1, sc2, sc3 = st.columns(3)
                 sc1.metric("Cross-validation score", f"{res['cv_mean']:.2%}" if clf_r else f"{res['cv_mean']:.3f}",
@@ -2273,7 +2110,8 @@ if uploaded_file:
                                       "average across all classes — see the class-by-class table below for each "
                                       "class's own numbers.")
 
-                    report = classification_report(y_test, preds, target_names=res['class_names'],
+                    report = classification_report(y_test, preds, labels=list(range(len(res['class_names']))),
+                                                    target_names=res['class_names'],
                                                     zero_division=0, output_dict=True)
                     report_df = pd.DataFrame(report).T
                     report_df = report_df.drop(index=[i for i in ["accuracy"] if i in report_df.index])
@@ -2401,13 +2239,7 @@ if uploaded_file:
                 st.write("## 1️⃣2️⃣ Research Interpretation")
                 st.write(f"### {res['algo']} — How It Reasons")
                 algo_r = res['algo']
-                render_algorithm_visualization(
-                    algo_r,
-                    pipe,
-                    res["X_test"],
-                    y_test,
-                    res
-                )
+                render_algorithm_visualization(algo_r, pipe, res["X_test"], y_test, res)
                 if algo_r == "Decision Tree":
                     render_tree(pipe, res['class_names'])
                 else:
@@ -2521,6 +2353,10 @@ if uploaded_file:
                     eps = st.slider("Neighborhood radius:", min_value=0.1, max_value=5.0, value=0.5, step=0.1)
                     min_samples = st.slider("Minimum neighbors:", min_value=2, max_value=20, value=5)
 
+                if unsup_method in UNSUP_CAP_ROWS:
+                    st.caption(f"ℹ️ For speed, {unsup_method} analyzes a random sample of at most "
+                              f"{UNSUP_CAP_ROWS[unsup_method]:,} rows.")
+
                 run_discovery = st.button("🚀 Discover Hidden Structure", type="primary")
 
             with right:
@@ -2533,11 +2369,10 @@ if uploaded_file:
                             n_clusters=n_clusters, eps=eps, min_samples=min_samples,
                             scale_features=scale_features, random_state=SEED)
 
-                        result_df = discovery["result"]
-                        metrics = discovery["metrics"]
                         st.session_state.unsup_results = {
-                            "result_df": result_df, "metrics": metrics, "method": unsup_method,
-                            "features": unsup_features, "scale_features": scale_features,
+                            "result_df": discovery["result"], "metrics": discovery["metrics"],
+                            "method": unsup_method, "features": list(unsup_features),
+                            "scale_features": scale_features,
                         }
                     except Exception as error:
                         st.error(f"Unsupervised analysis failed: {error}")
@@ -2545,17 +2380,26 @@ if uploaded_file:
 
                 unsup_state = st.session_state.get("unsup_results")
                 if unsup_state:
+                    # Always use what was STORED with the results, never the live widgets
+                    # (otherwise changing a dropdown before re-running breaks the display).
                     result_df = unsup_state["result_df"]
                     metrics = unsup_state["metrics"]
+                    u_method = unsup_state["method"]
+                    u_features = unsup_state["features"]
+                    u_scale = unsup_state["scale_features"]
 
                     # =============================================================
                     # STEP 10 — ALGORITHM COMPARISON (elbow chart for K-Means)
                     # =============================================================
                     st.write("## 🔟 Algorithm & Configuration Comparison")
+                    st.caption(f"Showing results for: **{u_method}** on {len(u_features)} features.")
+                    if metrics.get("sampled"):
+                        st.info(f"A random sample of {metrics['rows']:,} rows was analyzed because this method "
+                               "is too slow on the full dataset.")
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("Rows analyzed", f"{metrics['rows']:,}")
                     m2.metric("Features used", metrics["features"])
-                    if unsup_method == "Isolation Forest":
+                    if u_method == "Isolation Forest":
                         m3.metric("Anomalies", f"{metrics['anomalies']:,}")
                         anomaly_rate = metrics["anomalies"] / metrics["rows"]
                         m4.metric("Anomaly rate", f"{anomaly_rate:.2%}")
@@ -2564,17 +2408,19 @@ if uploaded_file:
                         m4.metric("Silhouette", "N/A" if metrics["silhouette"] is None
                                  else f"{metrics['silhouette']:.3f}")
 
-                    if unsup_method == "K-Means Clustering":
+                    if u_method == "K-Means Clustering":
                         max_k = min(10, max(2, len(result_df) - 1))
                         k_values = list(range(2, max_k + 1))
                         elbow_rows = []
-                        clean_data = result_df[unsup_features].replace([np.inf, -np.inf], np.nan)
+                        clean_data = result_df[u_features].replace([np.inf, -np.inf], np.nan)
                         clean_data = clean_data.fillna(clean_data.median(numeric_only=True))
-                        elbow_X = StandardScaler().fit_transform(clean_data) if scale_features else clean_data.to_numpy()
+                        elbow_X = StandardScaler().fit_transform(clean_data) if u_scale else clean_data.to_numpy()
+                        elbow_sil_n = SILHOUETTE_SAMPLE if len(elbow_X) > SILHOUETTE_SAMPLE else None
                         for k in k_values:
                             temp_model = KMeans(n_clusters=k, n_init=10, random_state=SEED)
                             temp_labels = temp_model.fit_predict(elbow_X)
-                            temp_silhouette = silhouette_score(elbow_X, temp_labels)
+                            temp_silhouette = silhouette_score(elbow_X, temp_labels,
+                                                               sample_size=elbow_sil_n, random_state=SEED)
                             elbow_rows.append({"Groups": k, "Inertia": temp_model.inertia_,
                                               "Silhouette": temp_silhouette})
                         elbow_df = pd.DataFrame(elbow_rows)
@@ -2591,7 +2437,7 @@ if uploaded_file:
                                "reduction in inertia. Higher silhouette values generally indicate "
                                "better-separated groups. This is your comparison across configurations.")
                     else:
-                        st.info(f"You chose **{unsup_method}**, which evaluates one configuration at a time "
+                        st.info(f"You chose **{u_method}**, which evaluates one configuration at a time "
                                "rather than comparing many — its result is shown above.")
 
                     # =============================================================
@@ -2599,7 +2445,7 @@ if uploaded_file:
                     # =============================================================
                     st.divider()
                     st.write("## 1️⃣1️⃣ Model Validation")
-                    if unsup_method != "Isolation Forest":
+                    if u_method != "Isolation Forest":
                         with st.expander("📏 Clustering Quality Metrics", expanded=True):
                             metric_data = {
                                 "Metric": ["Silhouette score", "Davies-Bouldin score", "Calinski-Harabasz score"],
@@ -2612,7 +2458,7 @@ if uploaded_file:
                             - **Calinski-Harabasz:** Higher is generally better.
                             """)
                         st.write("**Feature Distributions by Group**")
-                        selected_box_feature = st.selectbox("Choose a feature:", unsup_features, key="unsup_box_feature")
+                        selected_box_feature = st.selectbox("Choose a feature:", u_features, key="unsup_box_feature")
                         fig_box = px.box(result_df, x="Group Label", y=selected_box_feature, color="Group Label",
                                         points=False, title=f"{selected_box_feature} by discovered profile",
                                         template="plotly_white")
@@ -2627,7 +2473,7 @@ if uploaded_file:
                     # =============================================================
                     st.divider()
                     st.write("## 1️⃣2️⃣ Research Interpretation")
-                    if unsup_method != "Isolation Forest":
+                    if u_method != "Isolation Forest":
                         cluster_labels = metrics.get("cluster_labels", {})
                         if cluster_labels:
                             st.write("**What each group means:**")
@@ -2636,10 +2482,10 @@ if uploaded_file:
                             st.caption("These labels are generated from the selected features — they describe "
                                      "how each group's average feature values differ from the overall dataset average.")
 
-                        color_column, title = "Group Label", f"{unsup_method} by Feature Profile (PCA Projection)"
+                        color_column, title = "Group Label", f"{u_method} by Feature Profile (PCA Projection)"
                         st.write("**Group Profiles**")
-                        profile = result_df.groupby("Group Label")[unsup_features].mean().round(3)
-                        st.dataframe(profile, use_container_width=True)
+                        group_profile = result_df.groupby("Group Label")[u_features].mean().round(3)
+                        st.dataframe(group_profile, use_container_width=True)
                         profile_z = metrics.get("cluster_profile_z")
                         if profile_z is not None:
                             fig_profile = px.imshow(
@@ -2654,7 +2500,7 @@ if uploaded_file:
 
                     fig_map = px.scatter(
                         result_df, x="PCA 1", y="PCA 2", color=color_column,
-                        hover_data=unsup_features + ["Row"], title=title, template="plotly_white")
+                        hover_data=u_features + ["Row"], title=title, template="plotly_white")
                     fig_map.update_traces(marker={"size": 8, "opacity": 0.75})
                     st.plotly_chart(fig_map, use_container_width=True)
                     st.caption("Each point represents one row. Points near each other have similar feature patterns.")
@@ -2671,8 +2517,8 @@ if uploaded_file:
                                           file_name="unsupervised_discovery_results.csv", mime="text/csv")
                     report_txt = build_methodology_report(
                         {}, "Unsupervised Learning", target=None,
-                        mode_extra={"method": unsup_method, "features": unsup_features,
-                                   "scale_features": scale_features, "metrics": metrics})
+                        mode_extra={"method": u_method, "features": u_features,
+                                   "scale_features": u_scale, "metrics": metrics})
                     with ul2:
                         st.download_button("📄 Download Methodology Report (Markdown)", data=report_txt.encode("utf-8"),
                                           file_name="methodology_report.md", mime="text/markdown")
