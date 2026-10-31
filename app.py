@@ -561,7 +561,9 @@ def build_candidates(clf, balanced):
                 KNeighborsClassifier(),
                 {"model__n_neighbors": [3, 5, 11, 21], "model__weights": ["uniform", "distance"]}),
             "SVM": (
-                SVC(class_weight=cw, probability=True, random_state=SEED),
+                # probability=False: the app never uses predict_proba for SVM, and
+                # probability=True makes training roughly 5x slower.
+                SVC(class_weight=cw, probability=False, random_state=SEED),
                 {"model__C": [0.5, 1, 5, 20], "model__kernel": ["rbf", "linear"]}),
             "Random Forest": (
                 RandomForestClassifier(n_estimators=200, class_weight=cw, random_state=SEED, n_jobs=1),
@@ -859,6 +861,7 @@ def train_and_compare(X, y, clf, algos, tune, manual_depth, on_progress,
         "test_pct": 0 if cv_only else round(test_size * 100),
     }
 
+
 def coefficient_analysis(X_tr, y_tr, clf, pre, balanced, n_splits=5):
     """Refit a linear reference model (Logistic / Ridge) on every CV fold and report
     how large and how stable each variable's coefficient is.
@@ -902,6 +905,7 @@ def coefficient_analysis(X_tr, y_tr, clf, pre, balanced, n_splits=5):
         out["Sign agreement %"] = (np.sign(M) == np.sign(mean)).mean(axis=0) * 100
     out = out.reindex(out["Mean coefficient"].abs().sort_values(ascending=False).index)
     return out.reset_index(drop=True), signed
+
 
 def feature_names_of(pipe):
     names = pipe.named_steps["prep"].get_feature_names_out()
@@ -2071,71 +2075,80 @@ if uploaded_file:
 
         with col_a:
             st.write("### 💎 PCA (Dimensionality Reduction)")
-            with st.expander("📖 The Shadow Analogy (Explainer)"):
-                st.write("Imagine holding a 3D teapot in front of a flashlight. The shadow on the wall is 2D. **PCA** finds the best angle to hold the teapot so the shadow captures the most detail.")
+            # NOTE: Streamlit does not allow an expander inside another expander,
+            # so the analogy is shown as a plain caption instead.
+            st.caption("📖 **The Shadow Analogy:** Imagine holding a 3D teapot in front of a flashlight. "
+                       "The shadow on the wall is 2D. **PCA** finds the best angle to hold the teapot "
+                       "so the shadow captures the most detail.")
 
             pca_feats = st.multiselect("Select Numeric Columns to Compress:", num_cols, default=num_cols[:min(3, len(num_cols))])
             target_color = st.selectbox("Color Map by:", df.columns, index=list(df.columns).index(target) if target in df.columns else 0, key="pca_color")
 
-            if st.button("Generate PCA Insights") and len(pca_feats) >= 2:
-                pca_source = df.sample(min(len(df), 20000), random_state=SEED)
-                pca_input = pca_source[pca_feats].replace([np.inf, -np.inf], np.nan)
-                pca_input = pca_input.fillna(pca_input.median(numeric_only=True))
-                X_pca = StandardScaler().fit_transform(pca_input)
+            if st.button("Generate PCA Insights"):
+                if len(pca_feats) < 2:
+                    st.warning("Select at least two numeric columns to run PCA.")
+                else:
+                    pca_source = df.sample(min(len(df), 20000), random_state=SEED)
+                    pca_input = pca_source[pca_feats].replace([np.inf, -np.inf], np.nan)
+                    pca_input = pca_input.fillna(pca_input.median(numeric_only=True))
+                    X_pca = StandardScaler().fit_transform(pca_input)
 
-                pca = PCA(n_components=2)
-                comps = pca.fit_transform(X_pca)
+                    pca = PCA(n_components=2)
+                    comps = pca.fit_transform(X_pca)
 
-                loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=pca_feats)
-                top_driver_pc1 = loadings['PC1'].abs().idxmax()
-                top_driver_pc2 = loadings['PC2'].abs().idxmax()
+                    loadings = pd.DataFrame(pca.components_.T, columns=['PC1', 'PC2'], index=pca_feats)
+                    top_driver_pc1 = loadings['PC1'].abs().idxmax()
+                    top_driver_pc2 = loadings['PC2'].abs().idxmax()
 
-                var_pc1 = pca.explained_variance_ratio_[0] * 100
-                var_pc2 = pca.explained_variance_ratio_[1] * 100
-                label_x = f"PC1 ({var_pc1:.1f}%) — Primary Driver: {top_driver_pc1}"
-                label_y = f"PC2 ({var_pc2:.1f}%) — Primary Driver: {top_driver_pc2}"
+                    var_pc1 = pca.explained_variance_ratio_[0] * 100
+                    var_pc2 = pca.explained_variance_ratio_[1] * 100
+                    label_x = f"PC1 ({var_pc1:.1f}%) — Primary Driver: {top_driver_pc1}"
+                    label_y = f"PC2 ({var_pc2:.1f}%) — Primary Driver: {top_driver_pc2}"
 
-                pdf = pd.DataFrame(comps, columns=['PC1', 'PC2'])
-                pdf[target_color] = pca_source[target_color].astype(str).values
+                    pdf = pd.DataFrame(comps, columns=['PC1', 'PC2'])
+                    pdf[target_color] = pca_source[target_color].astype(str).values
 
-                fig_pca = px.scatter(
-                    pdf, x='PC1', y='PC2', color=target_color,
-                    title=f"PCA: {target_color} Distribution",
-                    labels={'PC1': label_x, 'PC2': label_y}, template="plotly_white")
-                st.plotly_chart(fig_pca, use_container_width=True)
+                    fig_pca = px.scatter(
+                        pdf, x='PC1', y='PC2', color=target_color,
+                        title=f"PCA: {target_color} Distribution",
+                        labels={'PC1': label_x, 'PC2': label_y}, template="plotly_white")
+                    st.plotly_chart(fig_pca, use_container_width=True)
 
-                st.write("#### 🧠 PCA Logic Visualizer")
-                l_col1, l_col2 = st.columns(2)
-                with l_col1:
-                    fig_var2 = px.bar(x=['PC1', 'PC2'], y=pca.explained_variance_ratio_,
-                                      title="Information Retention",
-                                      labels={'y': '% Info Retained', 'x': 'Component'},
-                                      color_discrete_sequence=['#636EFA'])
-                    st.plotly_chart(fig_var2, use_container_width=True)
-                with l_col2:
-                    fig_load = px.bar(loadings, barmode='group', title="Feature Influence (Loadings)",
-                                      labels={'index': 'Features', 'value': 'Weight'})
-                    st.plotly_chart(fig_load, use_container_width=True)
+                    st.write("#### 🧠 PCA Logic Visualizer")
+                    l_col1, l_col2 = st.columns(2)
+                    with l_col1:
+                        fig_var2 = px.bar(x=['PC1', 'PC2'], y=pca.explained_variance_ratio_,
+                                          title="Information Retention",
+                                          labels={'y': '% Info Retained', 'x': 'Component'},
+                                          color_discrete_sequence=['#636EFA'])
+                        st.plotly_chart(fig_var2, use_container_width=True)
+                    with l_col2:
+                        fig_load = px.bar(loadings, barmode='group', title="Feature Influence (Loadings)",
+                                          labels={'index': 'Features', 'value': 'Weight'})
+                        st.plotly_chart(fig_load, use_container_width=True)
 
-                st.info(f"""
-                **Insight Summary:**
-                * **PC1** represents **{var_pc1:.1f}%** of the dataset's variance and is most heavily influenced by **{top_driver_pc1}**.
-                * **PC2** represents **{var_pc2:.1f}%** of the variance and is primarily driven by **{top_driver_pc2}**.
-                """)
+                    st.info(f"""
+                    **Insight Summary:**
+                    * **PC1** represents **{var_pc1:.1f}%** of the dataset's variance and is most heavily influenced by **{top_driver_pc1}**.
+                    * **PC2** represents **{var_pc2:.1f}%** of the variance and is primarily driven by **{top_driver_pc2}**.
+                    """)
 
         with col_b:
             st.write("### 🌡️ Relationship Heatmap")
-            with st.expander("📖 The Dance Analogy (Explainer)"):
-                st.write("Correlation measures if variables 'dance' together. **+1.0 (Blue)** means they move in sync; **-1.0 (Red)** means they move in opposite directions.")
+            st.caption("📖 **The Dance Analogy:** Correlation measures if variables 'dance' together. "
+                       "**+1.0 (Blue)** means they move in sync; **-1.0 (Red)** means they move in "
+                       "opposite directions.")
 
             if st.button("Generate Relationship Heatmap"):
-                fig, ax = plt.subplots(figsize=(10, 8))
-                corr_matrix = df[num_cols].corr()
-                sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="RdBu", ax=ax, center=0)
-                st.pyplot(fig)
-                plt.close(fig)
+                if len(num_cols) < 2:
+                    st.warning("At least two numeric columns are needed for a correlation heatmap.")
+                else:
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    corr_matrix = df[num_cols].corr()
+                    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="RdBu", ax=ax, center=0)
+                    st.pyplot(fig)
+                    plt.close(fig)
 
-                if len(num_cols) > 1:
                     upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape, dtype=bool), k=1)).stack()
                     if len(upper):
                         pair = upper.abs().sort_values(ascending=False).index[0]
@@ -2180,6 +2193,12 @@ if uploaded_file:
 
             all_predictors = [c for c in df_model.columns
                               if c != target and c not in raw_date_cols]
+            # If the target itself is a date column, its derived calendar features
+            # (year, month, ...) would leak the answer, so exclude them too.
+            if target in raw_date_cols:
+                t_prefix = re.sub(r"\W+", "_", str(target)).strip("_") or "date"
+                all_predictors = [c for c in all_predictors
+                                  if c in df_raw.columns or not str(c).startswith(t_prefix + "_")]
             usable, dropped = screen_features(df_model, all_predictors)
 
             if dropped:
@@ -2429,11 +2448,18 @@ if uploaded_file:
                                 "Predicted negative": [calc['fn'], calc['tn']],
                             })
                             st.dataframe(cm_calc_df, use_container_width=True, hide_index=True)
+                            tp_, fp_, fn_ = calc['tp'], calc['fp'], calc['fn']
+                            prec_b = tp_ / (tp_ + fp_) if (tp_ + fp_) else 0.0
+                            rec_b = tp_ / (tp_ + fn_) if (tp_ + fn_) else 0.0
+                            f1_b = (2 * prec_b * rec_b / (prec_b + rec_b)) if (prec_b + rec_b) else 0.0
                             st.markdown(f"""
-- **Precision** = TP / (TP + FP) = {calc['tp']} / ({calc['tp']} + {calc['fp']}) = **{prec:.2%}**
-- **Recall** = TP / (TP + FN) = {calc['tp']} / ({calc['tp']} + {calc['fn']}) = **{rec:.2%}**
-- **F1** = 2 × (Precision × Recall) / (Precision + Recall) = 2 × ({prec:.3f} × {rec:.3f}) / ({prec:.3f} + {rec:.3f}) = **{f1:.2%}**
-""")
+                        - **Precision** = TP / (TP + FP) = {tp_} / ({tp_} + {fp_}) = **{prec_b:.2%}**
+                        - **Recall** = TP / (TP + FN) = {tp_} / ({tp_} + {fn_}) = **{rec_b:.2%}**
+                        - **F1** = 2 × (Precision × Recall) / (Precision + Recall) = 2 × ({prec_b:.3f} × {rec_b:.3f}) / ({prec_b:.3f} + {rec_b:.3f}) = **{f1_b:.2%}**
+                        """)
+                            st.caption("These are for the positive class only. The four boxes at the top of "
+                                       "Step 11 use a support-weighted average across both classes, so they "
+                                       "can differ slightly.")
                         else:
                             st.caption("With more than 2 classes, Precision/Recall/F1 above are a support-weighted "
                                       "average across all classes — see the class-by-class table below for each "
@@ -2592,7 +2618,7 @@ if uploaded_file:
                 else:
                     st.info("Importance could not be computed for this model.")
 
-                                st.write("### Coefficient Analysis (Linear Reference Model)")
+                st.write("### Coefficient Analysis (Linear Reference Model)")
                 if clf_r:
                     st.latex(r"\text{log-odds}(y) = w_1x_1 + w_2x_2 + \dots + b")
                 else:
