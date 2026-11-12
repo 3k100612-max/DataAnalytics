@@ -1405,10 +1405,6 @@ def forecast_with_rows(df_raw, res):
     out = pd.concat([hist, future], ignore_index=True)
     cols = [c for c in out.columns if c != "Forecast"] + ["Forecast"]
     return out[cols]
-
-
-def ts_metrics(y, p):
-
   
 def ts_metrics(y, p):
     y, p = np.asarray(y, dtype=float), np.asarray(p, dtype=float)
