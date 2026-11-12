@@ -2003,156 +2003,156 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
 
         with right:
             results = st.session_state.get("ts_results_by_key") or {}
-        for _lab, _why in st.session_state.get("ts_failed") or []:
+            for _lab, _why in st.session_state.get("ts_failed") or []:
             st.warning(f"⚠️ **{_lab}** could not be forecast: {_why}")
-        if not results:
+            if not results:
             st.info("Configure and run a forecast on the left to see Steps 10-13 here.")
             return
 
-        labels = list(results.keys())
-        if len(labels) > 1:
-            shown = st.selectbox("📌 Show results for:", labels,
-                                 key="ts_view_" + str(abs(hash(tuple(labels)))))
-        else:
-            shown = labels[0]
-        res = results[shown]
+            labels = list(results.keys())
+            if len(labels) > 1:
+                shown = st.selectbox("📌 Show results for:", labels,
+                                     key="ts_view_" + str(abs(hash(tuple(labels)))))
+            else:
+                shown = labels[0]
+            res = results[shown]
+    
+            board, winner = res["leaderboard"], res["winner"]
+            b = board.iloc[0]
 
-        board, winner = res["leaderboard"], res["winner"]
-        b = board.iloc[0]
-
-        # ---------------- STEP 10 ----------------
-        st.write(f"## 🔟 Algorithm Comparison — {res.get('label', res['value_col'])}")
-        d1, d2, d3, d4 = st.columns(4)
-        if res["split_mode"] == "cv":
-            d1.metric("Points before 1st fold", f"{res['n_train']:,}")
-            d2.metric("Points tested (all folds)", f"{res['n_test']:,}")
-        else:
-            d1.metric(f"Training points ({res['train_pct']}%)", f"{res['n_train']:,}")
-            d2.metric(f"Test points ({res['test_pct']}%)", f"{res['n_test']:,}")
-        d3.metric("Algorithms compared", len(board))
-        d4.metric("Gaps interpolated", f"{res['n_filled']:,}")
-        st.success(f"🏆 **Best algorithm: {winner}** — lowest average error across "
-                   f"{res['n_splits']} TimeSeriesSplit folds.")
-        if len(board) > 1:
-            fig_cmp = px.bar(board, x="Algorithm", y="Validation RMSE", color="Test RMSE",
-                             hover_data=["Validation ± std", "Test MAE", "Test MAPE %", "Test R²", "Time (s)"],
-                             title="Validation RMSE by Algorithm (lower is better)",
-                             color_continuous_scale="RdYlBu_r", template="plotly_white")
-            fig_cmp.update_layout(xaxis_tickangle=-35)
-            st.plotly_chart(fig_cmp, use_container_width=True)
-        with st.expander("🏁 See the full algorithm comparison table"):
-            st.dataframe(board.style.format({c: "{:.3f}" for c in board.columns if c != "Algorithm"}),
-                         use_container_width=True, hide_index=True)
-        for name, why in res["skipped"]:
-            st.caption(f"⚠️ Skipped **{name}**: {why}")
-
-        # ---------------- STEP 11 ----------------
-        st.divider()
-        st.write("## 1️⃣1️⃣ Model Validation")
-        if res["split_mode"] == "cv":
-            st.caption(f"Scores are averaged over {res['n_splits']} expanding-window folds. The chart stitches "
-                       "together each fold's out-of-sample forecast.")
-        else:
-            st.caption(f"The winner is scored once on the most recent {res['test_pct']}% of the timeline, "
-                       "which it never saw.")
-        v1, v2, v3, v4 = st.columns(4)
-        v1.metric("RMSE", f"{b['Test RMSE']:.3f}")
-        v2.metric("MAE", f"{b['Test MAE']:.3f}")
-        v3.metric("MAPE", "N/A" if pd.isna(b['Test MAPE %']) else f"{b['Test MAPE %']:.1f}%")
-        v4.metric("R²", f"{b['Test R²']:.3f}")
-        with st.expander("📖 What do these scores mean?"):
-            st.markdown("""
-            * **RMSE / MAE:** Typical forecast error in the same units as your data (lower is better).
-            * **MAPE:** Average error as a percentage of the real value.
-            * **R²:** 1.0 is perfect; 0 means no better than predicting the average; negative is worse than that.
-            * **Baseline:** "Tomorrow equals today". A real model must beat this.
-            """)
-
-        gain = 1 - float(b["Test RMSE"]) / res["baseline_rmse"] if res["baseline_rmse"] else 0
-        if gain > 0.05:
-            st.success(f"✅ Beats the 'repeat the last value' baseline by {gain:.0%} (baseline RMSE {res['baseline_rmse']:.3f}).")
-        else:
-            st.warning(f"⚠️ Barely beats the 'repeat the last value' baseline (RMSE {res['baseline_rmse']:.3f}). "
-                       "The series may be mostly random, or the seasonal period may be wrong.")
-
-        fig_test = go.Figure()
-        fig_test.add_scatter(x=res["train"].index[-3 * res["n_test"]:], y=res["train"].values[-3 * res["n_test"]:],
-                             name="Training (recent)", line=dict(color="#9ca3af"))
-        fig_test.add_scatter(x=res["test"].index, y=res["test"].values, name="Actual (tested)",
-                             line=dict(color="#2563eb"))
-        fig_test.add_scatter(x=res["test_pred"].index, y=res["test_pred"].values, name=f"{winner} prediction",
-                             line=dict(color="#dc2626", dash="dash"))
-        fig_test.update_layout(title="Actual vs Predicted on the Tested Period", template="plotly_white")
-        st.plotly_chart(fig_test, use_container_width=True)
-
-        resid = res["test"].values - res["test_pred"].values
-        fig_res = px.scatter(x=res["test"].index, y=resid, template="plotly_white",
-                             labels={"x": "Date", "y": "Error (Actual − Predicted)"}, title="Forecast Errors Over Time")
-        fig_res.add_hline(y=0, line_dash="dash", line_color="black")
-        st.plotly_chart(fig_res, use_container_width=True)
-        st.info("Errors should bounce randomly around zero. A steady drift or wave means the model is missing a trend or season.")
-
-        # ---------------- STEP 12 ----------------
-        st.divider()
-        st.write("## 1️⃣2️⃣ Research Interpretation & Forecast")
-        hist = res["series"].tail(max(res["horizon"] * 4, 100))
-        fc = res["forecast"]
-        fig_fc = go.Figure()
-        fig_fc.add_scatter(x=hist.index, y=hist.values, name="History", line=dict(color="#2563eb"))
-        fig_fc.add_scatter(x=fc.index, y=fc.values + res["band"], line=dict(width=0), showlegend=False, hoverinfo="skip")
-        fig_fc.add_scatter(x=fc.index, y=fc.values - res["band"], fill="tonexty", line=dict(width=0),
-                           fillcolor="rgba(220,38,38,0.15)", name="Approx. 95% range")
-        fig_fc.add_scatter(x=fc.index, y=fc.values, name="Forecast", line=dict(color="#dc2626"))
-        fig_fc.update_layout(title=f"{res['horizon']}-period Forecast ({winner})", template="plotly_white")
-        st.plotly_chart(fig_fc, use_container_width=True)
-        st.caption("The shaded range is approximate (±1.96 × test RMSE). Forecasts get less reliable the further ahead they go.")
-
-        trend = float(fc.iloc[-1] - res["series"].iloc[-1])
-        st.write(f"- Last observed value: **{res['series'].iloc[-1]:,.2f}** → forecast at the end of the horizon: "
-                 f"**{fc.iloc[-1]:,.2f}** ({'up' if trend >= 0 else 'down'} {abs(trend):,.2f}).")
-        if "(lags)" in winner:
-            st.write("- This is a **lag-based machine-learning model**: it learns how the last "
-                     f"{res['n_lags']} values plus the calendar (month, weekday, hour) predict the next value, "
-                     "then feeds its own predictions back in to look further ahead.")
-        elif winner in ("Holt-Winters", "ARIMA", "SARIMA"):
-            st.write("- This is a **classical statistical model**: it separates the series into level, trend "
-                     "and repeating season (or past values and past errors) and extends them forward.")
-        else:
-            st.write("- A simple rule-based model won, which usually means the series has little structure beyond "
-                     "its most recent level or its repeating season.")
-
-                # ---------------- STEP 13 ----------------
-        st.divider()
-        st.write("## 1️⃣3️⃣ Download Results & Methodology")
-        dl1, dl2 = st.columns(2)
-
-        df_rows, _ = fill_missing_dates(df_raw, res["date_col"])
-        by_group = {}                      # every forecast, grouped by which group it belongs to
-        for r in results.values():
-            by_group.setdefault((r.get("id_col"), r.get("id_value")), []).append(r)
-        mine = by_group[(res.get("id_col"), res.get("id_value"))]
-        out = merge_forecast_columns([forecast_with_rows(df_rows, r) for r in mine])
-        id_part = f"_{res['id_value']}" if res.get("id_col") else ""
-        safe_name = re.sub(r"\W+", "_", "_".join(r["value_col"] for r in mine) + id_part).strip("_") or "value"
-
-        with dl1:
-            st.download_button("📥 Download Forecast (CSV)",
-                               data=out.to_csv(index=False).encode("utf-8"),
-                               file_name=f"forecast_{safe_name}.csv", mime="text/csv")
-            if len(mine) > 1:
-                st.caption("Has one Forecast column for each of: " + ", ".join(r["value_col"] for r in mine))
-            if len(by_group) > 1:
-                all_out = stack_forecasts([
-                    merge_forecast_columns([forecast_with_rows(df_rows, r) for r in rs])
-                    for rs in by_group.values()])
-                st.download_button(f"📥 Download All {len(by_group)} Groups (CSV)",
-                                   data=all_out.to_csv(index=False).encode("utf-8"),
-                                   file_name="forecast_all_groups.csv", mime="text/csv")
-        with dl2:
-            st.download_button("📄 Download Methodology Report (Markdown)",
-                               data=build_ts_report(res, res["value_col"], res["date_col"],
-                                                    res["n_filled"]).encode("utf-8"),
-                               file_name=f"methodology_report_{safe_name}.md", mime="text/markdown")
+            # ---------------- STEP 10 ----------------
+            st.write(f"## 🔟 Algorithm Comparison — {res.get('label', res['value_col'])}")
+            d1, d2, d3, d4 = st.columns(4)
+            if res["split_mode"] == "cv":
+                d1.metric("Points before 1st fold", f"{res['n_train']:,}")
+                d2.metric("Points tested (all folds)", f"{res['n_test']:,}")
+            else:
+                d1.metric(f"Training points ({res['train_pct']}%)", f"{res['n_train']:,}")
+                d2.metric(f"Test points ({res['test_pct']}%)", f"{res['n_test']:,}")
+            d3.metric("Algorithms compared", len(board))
+            d4.metric("Gaps interpolated", f"{res['n_filled']:,}")
+            st.success(f"🏆 **Best algorithm: {winner}** — lowest average error across "
+                       f"{res['n_splits']} TimeSeriesSplit folds.")
+            if len(board) > 1:
+                fig_cmp = px.bar(board, x="Algorithm", y="Validation RMSE", color="Test RMSE",
+                                 hover_data=["Validation ± std", "Test MAE", "Test MAPE %", "Test R²", "Time (s)"],
+                                 title="Validation RMSE by Algorithm (lower is better)",
+                                 color_continuous_scale="RdYlBu_r", template="plotly_white")
+                fig_cmp.update_layout(xaxis_tickangle=-35)
+                st.plotly_chart(fig_cmp, use_container_width=True)
+            with st.expander("🏁 See the full algorithm comparison table"):
+                st.dataframe(board.style.format({c: "{:.3f}" for c in board.columns if c != "Algorithm"}),
+                             use_container_width=True, hide_index=True)
+            for name, why in res["skipped"]:
+                st.caption(f"⚠️ Skipped **{name}**: {why}")
+    
+            # ---------------- STEP 11 ----------------
+            st.divider()
+            st.write("## 1️⃣1️⃣ Model Validation")
+            if res["split_mode"] == "cv":
+                st.caption(f"Scores are averaged over {res['n_splits']} expanding-window folds. The chart stitches "
+                           "together each fold's out-of-sample forecast.")
+            else:
+                st.caption(f"The winner is scored once on the most recent {res['test_pct']}% of the timeline, "
+                           "which it never saw.")
+            v1, v2, v3, v4 = st.columns(4)
+            v1.metric("RMSE", f"{b['Test RMSE']:.3f}")
+            v2.metric("MAE", f"{b['Test MAE']:.3f}")
+            v3.metric("MAPE", "N/A" if pd.isna(b['Test MAPE %']) else f"{b['Test MAPE %']:.1f}%")
+            v4.metric("R²", f"{b['Test R²']:.3f}")
+            with st.expander("📖 What do these scores mean?"):
+                st.markdown("""
+                * **RMSE / MAE:** Typical forecast error in the same units as your data (lower is better).
+                * **MAPE:** Average error as a percentage of the real value.
+                * **R²:** 1.0 is perfect; 0 means no better than predicting the average; negative is worse than that.
+                * **Baseline:** "Tomorrow equals today". A real model must beat this.
+                """)
+    
+            gain = 1 - float(b["Test RMSE"]) / res["baseline_rmse"] if res["baseline_rmse"] else 0
+            if gain > 0.05:
+                st.success(f"✅ Beats the 'repeat the last value' baseline by {gain:.0%} (baseline RMSE {res['baseline_rmse']:.3f}).")
+            else:
+                st.warning(f"⚠️ Barely beats the 'repeat the last value' baseline (RMSE {res['baseline_rmse']:.3f}). "
+                           "The series may be mostly random, or the seasonal period may be wrong.")
+    
+            fig_test = go.Figure()
+            fig_test.add_scatter(x=res["train"].index[-3 * res["n_test"]:], y=res["train"].values[-3 * res["n_test"]:],
+                                 name="Training (recent)", line=dict(color="#9ca3af"))
+            fig_test.add_scatter(x=res["test"].index, y=res["test"].values, name="Actual (tested)",
+                                 line=dict(color="#2563eb"))
+            fig_test.add_scatter(x=res["test_pred"].index, y=res["test_pred"].values, name=f"{winner} prediction",
+                                 line=dict(color="#dc2626", dash="dash"))
+            fig_test.update_layout(title="Actual vs Predicted on the Tested Period", template="plotly_white")
+            st.plotly_chart(fig_test, use_container_width=True)
+    
+            resid = res["test"].values - res["test_pred"].values
+            fig_res = px.scatter(x=res["test"].index, y=resid, template="plotly_white",
+                                 labels={"x": "Date", "y": "Error (Actual − Predicted)"}, title="Forecast Errors Over Time")
+            fig_res.add_hline(y=0, line_dash="dash", line_color="black")
+            st.plotly_chart(fig_res, use_container_width=True)
+            st.info("Errors should bounce randomly around zero. A steady drift or wave means the model is missing a trend or season.")
+    
+            # ---------------- STEP 12 ----------------
+            st.divider()
+            st.write("## 1️⃣2️⃣ Research Interpretation & Forecast")
+            hist = res["series"].tail(max(res["horizon"] * 4, 100))
+            fc = res["forecast"]
+            fig_fc = go.Figure()
+            fig_fc.add_scatter(x=hist.index, y=hist.values, name="History", line=dict(color="#2563eb"))
+            fig_fc.add_scatter(x=fc.index, y=fc.values + res["band"], line=dict(width=0), showlegend=False, hoverinfo="skip")
+            fig_fc.add_scatter(x=fc.index, y=fc.values - res["band"], fill="tonexty", line=dict(width=0),
+                               fillcolor="rgba(220,38,38,0.15)", name="Approx. 95% range")
+            fig_fc.add_scatter(x=fc.index, y=fc.values, name="Forecast", line=dict(color="#dc2626"))
+            fig_fc.update_layout(title=f"{res['horizon']}-period Forecast ({winner})", template="plotly_white")
+            st.plotly_chart(fig_fc, use_container_width=True)
+            st.caption("The shaded range is approximate (±1.96 × test RMSE). Forecasts get less reliable the further ahead they go.")
+    
+            trend = float(fc.iloc[-1] - res["series"].iloc[-1])
+            st.write(f"- Last observed value: **{res['series'].iloc[-1]:,.2f}** → forecast at the end of the horizon: "
+                     f"**{fc.iloc[-1]:,.2f}** ({'up' if trend >= 0 else 'down'} {abs(trend):,.2f}).")
+            if "(lags)" in winner:
+                st.write("- This is a **lag-based machine-learning model**: it learns how the last "
+                         f"{res['n_lags']} values plus the calendar (month, weekday, hour) predict the next value, "
+                         "then feeds its own predictions back in to look further ahead.")
+            elif winner in ("Holt-Winters", "ARIMA", "SARIMA"):
+                st.write("- This is a **classical statistical model**: it separates the series into level, trend "
+                         "and repeating season (or past values and past errors) and extends them forward.")
+            else:
+                st.write("- A simple rule-based model won, which usually means the series has little structure beyond "
+                         "its most recent level or its repeating season.")
+    
+                    # ---------------- STEP 13 ----------------
+            st.divider()
+            st.write("## 1️⃣3️⃣ Download Results & Methodology")
+            dl1, dl2 = st.columns(2)
+    
+            df_rows, _ = fill_missing_dates(df_raw, res["date_col"])
+            by_group = {}                      # every forecast, grouped by which group it belongs to
+            for r in results.values():
+                by_group.setdefault((r.get("id_col"), r.get("id_value")), []).append(r)
+            mine = by_group[(res.get("id_col"), res.get("id_value"))]
+            out = merge_forecast_columns([forecast_with_rows(df_rows, r) for r in mine])
+            id_part = f"_{res['id_value']}" if res.get("id_col") else ""
+            safe_name = re.sub(r"\W+", "_", "_".join(r["value_col"] for r in mine) + id_part).strip("_") or "value"
+    
+            with dl1:
+                st.download_button("📥 Download Forecast (CSV)",
+                                   data=out.to_csv(index=False).encode("utf-8"),
+                                   file_name=f"forecast_{safe_name}.csv", mime="text/csv")
+                if len(mine) > 1:
+                    st.caption("Has one Forecast column for each of: " + ", ".join(r["value_col"] for r in mine))
+                if len(by_group) > 1:
+                    all_out = stack_forecasts([
+                        merge_forecast_columns([forecast_with_rows(df_rows, r) for r in rs])
+                        for rs in by_group.values()])
+                    st.download_button(f"📥 Download All {len(by_group)} Groups (CSV)",
+                                       data=all_out.to_csv(index=False).encode("utf-8"),
+                                       file_name="forecast_all_groups.csv", mime="text/csv")
+            with dl2:
+                st.download_button("📄 Download Methodology Report (Markdown)",
+                                   data=build_ts_report(res, res["value_col"], res["date_col"],
+                                                        res["n_filled"]).encode("utf-8"),
+                                   file_name=f"methodology_report_{safe_name}.md", mime="text/markdown")
 
 
 # ----------------------------------------------------------------------------
