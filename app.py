@@ -1849,11 +1849,19 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
         st.divider()
         st.write("## 1️⃣3️⃣ Download Results & Methodology")
         dl1, dl2 = st.columns(2)
-        out = pd.DataFrame({"Date": fc.index, "Forecast": fc.values,
-                            "Lower": fc.values - res["band"], "Upper": fc.values + res["band"]})
+        out = pd.DataFrame({
+            res["date_col"]: fc.index,
+            "Column forecasted": res["value_col"],
+            "Forecast": fc.values,
+            "Lower": fc.values - res["band"],
+            "Upper": fc.values + res["band"],
+            "Algorithm": winner,
+        })
+        safe_name = re.sub(r"\W+", "_", str(res["value_col"])).strip("_") or "value"
         with dl1:
-            st.download_button("📥 Download Forecast (CSV)", data=out.to_csv(index=False).encode("utf-8"),
-                               file_name="forecast.csv", mime="text/csv")
+            st.download_button("📥 Download Forecast (CSV)",
+                               data=out.to_csv(index=False).encode("utf-8"),
+                               file_name=f"forecast_{safe_name}.csv", mime="text/csv")
         with dl2:
             st.download_button("📄 Download Methodology Report (Markdown)",
                                data=build_ts_report(res, res["value_col"], res["date_col"], res["n_filled"]).encode("utf-8"),
