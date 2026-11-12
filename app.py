@@ -1381,7 +1381,34 @@ def prepare_series(df, date_col, value_col, freq_label):
     s.name = value_col
     return s, freq, n_filled
 
-def forecast_with_rows(df_raw, res):  
+def forecast_with_rows(df_raw, res):
+    """Original rows of the series plus future rows, with Forecast as the LAST column."""
+    date_col = res["date_col"]
+    id_col, id_value = res.get("id_col"), res.get("id_value")
+
+    hist = df_raw
+    if id_col:
+        hist = hist[hist[id_col].astype(str) == str(id_value)]
+    hist = hist.copy()
+    hist[date_col] = _to_datetime_quiet(hist[date_col])
+    hist = hist.sort_values(date_col)
+    hist["Row type"] = "Actual"
+    hist["Forecast"] = hist[date_col].map(res["test_pred"])
+
+    fc = res["forecast"]
+    future = pd.DataFrame({date_col: fc.index})
+    if id_col:
+        future[id_col] = hist[id_col].iloc[0] if len(hist) else id_value
+    future["Row type"] = "Forecast"
+    future["Forecast"] = fc.values
+
+    out = pd.concat([hist, future], ignore_index=True)
+    cols = [c for c in out.columns if c != "Forecast"] + ["Forecast"]
+    return out[cols]
+
+
+def ts_metrics(y, p):
+
   
 def ts_metrics(y, p):
     y, p = np.asarray(y, dtype=float), np.asarray(p, dtype=float)
