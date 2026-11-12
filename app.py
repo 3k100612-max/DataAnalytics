@@ -121,6 +121,16 @@ TS_FREQS = {                # label -> pandas frequency alias
     "Monthly": "MS", "Quarterly": "QS", "Yearly": "YS",
 }
 
+# Plotting: never draw more than this many points in one scatter (keeps the browser responsive)
+MAX_PLOT_POINTS = 5000
+
+
+def plot_sample(n, seed=SEED):
+    """Row positions to draw, never more than MAX_PLOT_POINTS."""
+    if n <= MAX_PLOT_POINTS:
+        return np.arange(n)
+    return np.sort(np.random.RandomState(seed).choice(n, MAX_PLOT_POINTS, replace=False))
+
 
 def recommend_split(n_rows):
     """Rule-of-thumb suggestion for the validation strategy; the user can always override it."""
@@ -186,6 +196,7 @@ def _to_datetime_quiet(values, dayfirst=False):
         return pd.to_datetime(values, errors="coerce", dayfirst=dayfirst)
 
 
+@st.cache_data
 def add_datetime_features(df, dayfirst=False, parse_threshold=0.80):
     """
     Detect likely date/time columns and add numeric features for modeling.
@@ -287,9 +298,16 @@ def fix_missing(df):
     return df
 
 
+@st.cache_data
+def to_csv_bytes(df):
+    """CSV bytes for download buttons, cached so big files are not re-encoded on every click."""
+    return df.to_csv(index=False).encode("utf-8")
+
+
 # ----------------------------------------------------------------------------
 # 3. DATASET UNDERSTANDING HELPERS (steps 2-6)
 # ----------------------------------------------------------------------------
+@st.cache_data
 def research_profile(df):
     """A quick 'research profile' of the raw dataset: shape, column types,
     memory footprint, duplicate rows, and overall completeness."""
@@ -311,6 +329,7 @@ def research_profile(df):
     }
 
 
+@st.cache_data
 def missing_data_table(df):
     """Per-column missing-value counts and percentages, sorted worst-first."""
     miss = df.isnull().sum()
@@ -319,6 +338,7 @@ def missing_data_table(df):
     return out.sort_values("Missing", ascending=False).reset_index(drop=True)
 
 
+@st.cache_data
 def detect_duplicates_and_ids(df):
     """Duplicate row count plus a list of columns that look like identifiers,
     constants, or free text — the columns the ML step will screen out."""
@@ -339,6 +359,7 @@ def detect_duplicates_and_ids(df):
     return dup_rows, dup_pct, id_like
 
 
+@st.cache_data
 def variable_summary_table(df):
     """One-row-per-column summary: type, missing %, and either numeric stats
     or the most common category, whichever fits the column."""
@@ -561,7 +582,9 @@ def build_candidates(clf, balanced):
                 KNeighborsClassifier(),
                 {"model__n_neighbors": [3, 5, 11, 21], "model__weights": ["uniform", "distance"]}),
             "SVM": (
-                SVC(class_weight=cw, probability=True, random_state=SEED),
+                # probability=True removed: it triggers an internal 5-fold CV on every fit
+                # (~5x slower) and the app never uses predicted probabilities.
+                SVC(class_weight=cw, random_state=SEED),
                 {"model__C": [0.5, 1, 5, 20], "model__kernel": ["rbf", "linear"]}),
             "Random Forest": (
                 RandomForestClassifier(n_estimators=200, class_weight=cw, random_state=SEED, n_jobs=1),
@@ -989,6 +1012,11 @@ def explain_algo(algo_r):
 def render_algorithm_visualization(algo_name, pipe, X_test, y_test, res):
     """Educational algorithm visualization (each one wrapped so a failure never breaks the app)."""
     try:
+        # Draw at most MAX_PLOT_POINTS rows so big test sets never freeze the browser.
+        _s = plot_sample(len(X_test))
+        X_test = X_test.iloc[_s]
+        y_test = np.asarray(y_test)[_s]
+
         model = pipe.named_steps["model"]
         class_names = res.get("class_names")
         is_class_task = is_clf(res["task"])
@@ -1014,7 +1042,10 @@ def render_algorithm_visualization(algo_name, pipe, X_test, y_test, res):
         # ---- LDA -----------------------------------------------------------------
         elif algo_name == "Linear Discriminant Analysis":
             X_prepared = pipe.named_steps["prep"].transform(X_test)
-            X_lda = model.transform(X_prepared)
+            try:
+                X_lda = model.transform(X_prepared)
+            except Exception:            # the 'lsqr' solver has no transform()
+                X_lda = np.asarray(model.decision_function(X_prepared)).reshape(len(X_prepared), -1)
             plot_df = pd.DataFrame({"LDA1": X_lda[:, 0],
                                     "Class": [class_names[i] for i in y_test]})
             if X_lda.shape[1] > 1:
@@ -1238,6 +1269,25 @@ def validate_unsupervised(data, method, n_clusters, eps, min_samples, scale_feat
     return pd.DataFrame(rows)
 
 
+@st.cache_data(show_spinner="Computing elbow chart...")
+def compute_elbow(data, scale, seed=SEED):
+    """Inertia and silhouette for k = 2..10. Cached so changing an unrelated dropdown
+    does not refit nine K-Means models."""
+    data = data.replace([np.inf, -np.inf], np.nan)
+    data = data.fillna(data.median(numeric_only=True)).fillna(0)
+    if len(data) > 20000:
+        data = data.sample(20000, random_state=seed)
+    X = StandardScaler().fit_transform(data) if scale else data.to_numpy()
+    sil_n = SILHOUETTE_SAMPLE if len(X) > SILHOUETTE_SAMPLE else None
+    rows = []
+    for k in range(2, min(10, max(2, len(X) - 1)) + 1):
+        km = KMeans(n_clusters=k, n_init=10, random_state=seed)
+        lab = km.fit_predict(X)
+        rows.append({"Groups": k, "Inertia": km.inertia_,
+                     "Silhouette": silhouette_score(X, lab, sample_size=sil_n, random_state=seed)})
+    return pd.DataFrame(rows)
+
+
 def run_unsupervised_analysis(df, features, method, n_clusters, eps, min_samples,
                               scale_features, random_state, test_size=0.20, cv_folds=5):
     """Clean the chosen numeric columns, run the selected unsupervised method,
@@ -1245,7 +1295,7 @@ def run_unsupervised_analysis(df, features, method, n_clusters, eps, min_samples
     validation strategy (hold-out or cross-validation) is run alongside."""
     data = df[features].copy()
     data = data.replace([np.inf, -np.inf], np.nan)
-    data = data.fillna(data.median(numeric_only=True))
+    data = data.fillna(data.median(numeric_only=True)).fillna(0)   # .fillna(0): all-NaN columns
 
     # Some methods are O(n^2) in memory/time; analyze a random sample above the cap.
     sampled = False
@@ -1381,6 +1431,7 @@ def prepare_series(df, date_col, value_col, freq_label):
     s.name = value_col
     return s, freq, n_filled
 
+
 def forecast_with_rows(df_raw, res):
     """Original rows of the series plus future rows, with Forecast as the LAST column."""
     date_col = res["date_col"]
@@ -1405,7 +1456,8 @@ def forecast_with_rows(df_raw, res):
     out = pd.concat([hist, future], ignore_index=True)
     cols = [c for c in out.columns if c != "Forecast"] + ["Forecast"]
     return out[cols]
-  
+
+
 def ts_metrics(y, p):
     y, p = np.asarray(y, dtype=float), np.asarray(p, dtype=float)
     nz = y != 0
@@ -1715,7 +1767,7 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
             st.error(f"⚠️ {e}")
             return
 
-        # ---- NEW: warn if the chosen value looks like a year or a constant ----
+        # ---- warn if the chosen value looks like a year or a constant ----
         if series.nunique() <= 1 or (series.between(1900, 2100).all() and (series % 1 == 0).all()):
             st.warning(f"⚠️ '{value_col}' looks like a year or constant column, not a measurement. "
                        "Pick the column you actually want to forecast.")
@@ -1874,7 +1926,7 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
             st.write("- A simple rule-based model won, which usually means the series has little structure beyond "
                      "its most recent level or its repeating season.")
 
-         # ---------------- STEP 13 ----------------
+        # ---------------- STEP 13 ----------------
         st.divider()
         st.write("## 1️⃣3️⃣ Download Results & Methodology")
         dl1, dl2 = st.columns(2)
@@ -1899,7 +1951,6 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
                                data=build_ts_report(res, res["value_col"], res["date_col"],
                                                     res["n_filled"]).encode("utf-8"),
                                file_name=f"methodology_report{id_part}.md", mime="text/markdown")
-       
 
 
 # ----------------------------------------------------------------------------
@@ -1947,6 +1998,13 @@ st.header("1️⃣ Upload Dataset")
 uploaded_file = st.file_uploader("Upload a CSV file to begin the research pipeline.", type="csv")
 
 if uploaded_file:
+    # Clear results from a previous dataset whenever a different file is uploaded.
+    _file_key = (uploaded_file.name, uploaded_file.size)
+    if st.session_state.get("_file_key") != _file_key:
+        st.session_state["_file_key"] = _file_key
+        for _k in ("ml_results", "ts_results", "unsup_results"):
+            st.session_state[_k] = None
+
     df_raw, total_missing = load_raw(uploaded_file, row_limit)
 
     # Create a separate copy with model-ready features derived from date/time columns.
@@ -1972,16 +2030,21 @@ if uploaded_file:
 
     if profile['completeness'] >= 0.98 and profile['duplicate_rows'] == 0:
         st.success("✅ This dataset looks healthy — very few missing values and no duplicate rows.")
-    elif profile['completeness'] >= 0.90:
-        st.info(f"ℹ️ {profile['missing_total']:,} missing values were found and have been automatically "
-               "fixed for exploration (median for numbers, most common value for categories). "
-               "Inside the model pipeline, missing values are always fixed *after* the train/test "
-               "split so no test information leaks into training.")
-    else:
+    elif profile['completeness'] < 0.90:
         st.warning(f"⚠️ This dataset is fairly sparse ({profile['completeness']:.0%} complete). "
-                  "Results may be less reliable — consider checking the source data.")
+                   "Results may be less reliable — consider checking the source data.")
+    else:
+        msgs = []
+        if profile['missing_total']:
+            msgs.append(f"{profile['missing_total']:,} missing values were found and have been automatically "
+                        "fixed for exploration (median for numbers, most common value for categories). "
+                        "Inside the model pipeline, missing values are always fixed *after* the train/test "
+                        "split so no test information leaks into training.")
+        if profile['duplicate_rows']:
+            msgs.append(f"{profile['duplicate_rows']:,} duplicate rows were found (see Step 5).")
+        st.info("ℹ️ " + " ".join(msgs))
 
-    csv_data = df.to_csv(index=False).encode('utf-8')
+    csv_data = to_csv_bytes(df)
     st.download_button(label="📥 Download Auto-Fixed Dataset (CSV)", data=csv_data, file_name="cleaned_data.csv")
 
     # =========================================================================
@@ -2140,7 +2203,12 @@ if uploaded_file:
                 label_y = f"PC2 ({var_pc2:.1f}%) — Primary Driver: {top_driver_pc2}"
 
                 pdf = pd.DataFrame(comps, columns=['PC1', 'PC2'])
-                pdf[target_color] = pca_source[target_color].astype(str).values
+                # Continuous columns get a color scale; a legend with thousands of entries would freeze the page.
+                color_vals = pca_source[target_color]
+                if pd.api.types.is_numeric_dtype(color_vals) and color_vals.nunique() > 20:
+                    pdf[target_color] = color_vals.values
+                else:
+                    pdf[target_color] = color_vals.astype(str).values
 
                 fig_pca = px.scatter(
                     pdf, x='PC1', y='PC2', color=target_color,
@@ -2569,15 +2637,20 @@ if uploaded_file:
                     except Exception:
                         st.info("Not enough spread in the target to break it into value ranges.")
 
-                    fig_reg = px.scatter(x=y_test, y=preds, labels={'x': 'Actual Value', 'y': 'Predicted Value'},
-                                        title="Actual vs Predicted Comparison")
+                    # Plot at most MAX_PLOT_POINTS points; metrics above still use every row.
+                    _s = plot_sample(len(y_test))
+                    fig_reg = px.scatter(x=np.asarray(y_test)[_s], y=np.asarray(preds)[_s],
+                                         labels={'x': 'Actual Value', 'y': 'Predicted Value'},
+                                         title="Actual vs Predicted Comparison")
                     fig_reg.add_shape(type="line", x0=float(np.min(y_test)), y0=float(np.min(y_test)),
                                       x1=float(np.max(y_test)), y1=float(np.max(y_test)),
                                       line=dict(color="Red", dash="dash"))
                     st.plotly_chart(fig_reg, use_container_width=True)
 
-                    residuals = y_test - preds
-                    residual_df = pd.DataFrame({"Actual": y_test, "Predicted": preds, "Residual": residuals})
+                    residuals = np.asarray(y_test) - np.asarray(preds)
+                    residual_df = pd.DataFrame({"Actual": np.asarray(y_test)[_s],
+                                                "Predicted": np.asarray(preds)[_s],
+                                                "Residual": residuals[_s]})
                     fig_residuals = px.scatter(
                         residual_df, x="Predicted", y="Residual", color="Residual",
                         color_continuous_scale="RdBu", title="Residual Plot",
@@ -2848,21 +2921,8 @@ if uploaded_file:
                                  else f"{metrics['silhouette']:.3f}")
 
                     if u_method == "K-Means Clustering":
-                        max_k = min(10, max(2, len(result_df) - 1))
-                        k_values = list(range(2, max_k + 1))
-                        elbow_rows = []
-                        clean_data = result_df[u_features].replace([np.inf, -np.inf], np.nan)
-                        clean_data = clean_data.fillna(clean_data.median(numeric_only=True))
-                        elbow_X = StandardScaler().fit_transform(clean_data) if u_scale else clean_data.to_numpy()
-                        elbow_sil_n = SILHOUETTE_SAMPLE if len(elbow_X) > SILHOUETTE_SAMPLE else None
-                        for k in k_values:
-                            temp_model = KMeans(n_clusters=k, n_init=10, random_state=SEED)
-                            temp_labels = temp_model.fit_predict(elbow_X)
-                            temp_silhouette = silhouette_score(elbow_X, temp_labels,
-                                                               sample_size=elbow_sil_n, random_state=SEED)
-                            elbow_rows.append({"Groups": k, "Inertia": temp_model.inertia_,
-                                              "Silhouette": temp_silhouette})
-                        elbow_df = pd.DataFrame(elbow_rows)
+                        # Cached: picking a different box-plot feature below no longer refits 9 models.
+                        elbow_df = compute_elbow(result_df[u_features], u_scale)
                         e1, e2 = st.columns(2)
                         with e1:
                             fig_elbow = px.line(elbow_df, x="Groups", y="Inertia", markers=True,
@@ -2977,11 +3037,13 @@ if uploaded_file:
                                "were flagged as anomalies — unusual combinations of the selected features.")
 
                     fig_map = px.scatter(
-                        result_df, x="PCA 1", y="PCA 2", color=color_column,
-                        hover_data=u_features + ["Row"], title=title, template="plotly_white")
+                        result_df.iloc[plot_sample(len(result_df))], x="PCA 1", y="PCA 2",
+                        color=color_column, hover_data=u_features + ["Row"],
+                        title=title, template="plotly_white")
                     fig_map.update_traces(marker={"size": 8, "opacity": 0.75})
                     st.plotly_chart(fig_map, use_container_width=True)
-                    st.caption("Each point represents one row. Points near each other have similar feature patterns.")
+                    st.caption("Each point represents one row (at most "
+                               f"{MAX_PLOT_POINTS:,} are drawn). Points near each other have similar feature patterns.")
 
                     # =============================================================
                     # STEP 13 — DOWNLOAD RESULTS AND METHODOLOGY
