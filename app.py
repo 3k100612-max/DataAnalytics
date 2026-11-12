@@ -1691,6 +1691,11 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
             st.error(f"⚠️ {e}")
             return
 
+        # ---- NEW: warn if the chosen value looks like a year or a constant ----
+        if series.nunique() <= 1 or (series.between(1900, 2100).all() and (series % 1 == 0).all()):
+            st.warning(f"⚠️ '{value_col}' looks like a year or constant column, not a measurement. "
+                       "Pick the column you actually want to forecast.")
+
         st.caption(f"✅ {len(series):,} points · frequency `{freq}` · "
                    f"{series.index.min():%Y-%m-%d} → {series.index.max():%Y-%m-%d}"
                    + (f" · {n_filled:,} empty periods interpolated" if n_filled else ""))
