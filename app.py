@@ -2001,7 +2001,7 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
                 st.session_state.ts_results_by_key = results
                 st.session_state.ts_failed = failed
 
-        with right:
+         with right:
             results = st.session_state.get("ts_results_by_key") or {}
             for _lab, _why in st.session_state.get("ts_failed") or []:
             st.warning(f"⚠️ **{_lab}** could not be forecast: {_why}")
