@@ -1396,9 +1396,20 @@ def default_season(freq):
     return 1
 
 
-def prepare_series(df, date_col, value_col, freq_label):
-    """Turn two columns into a clean, evenly spaced, gap-free time series.
-    Rows sharing a period are averaged; empty periods are interpolated."""
+SUM_HINT = re.compile(r"amt|amount|sales|revenue|qty|quantity|units|volume|count|total|cost|"
+                      r"profit|orders|cases|\bcs\b|\bib\b", re.IGNORECASE)
+
+
+def default_aggregation(value_col):
+    """Amounts and quantities add up within a period (sum); rates, prices and
+    readings do not (average). Guessed from the column name, user can override."""
+    return "sum" if SUM_HINT.search(str(value_col)) else "mean"
+
+
+def prepare_series(df, date_col, value_col, freq_label, agg="mean"):
+    """Turn two columns into a clean, evenly spaced time series.
+    agg='sum'  : rows sharing a period are added up (sales, quantities); empty periods = 0.
+    agg='mean' : rows sharing a period are averaged (prices, rates); empty periods are interpolated."""
     d = df[[date_col, value_col]].copy()
     d[date_col] = _to_datetime_quiet(d[date_col])
     d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
@@ -1423,11 +1434,15 @@ def prepare_series(df, date_col, value_col, freq_label):
             else:
                 freq = "QS"
 
-    s = d.set_index(date_col)[value_col].resample(freq).mean()
-    n_filled = int(s.isna().sum())
-    if s.notna().sum() == 0:
+    grouped = d.set_index(date_col)[value_col].resample(freq)
+    if grouped.count().sum() == 0:
         raise ValueError("The value column has no numeric data.")
-    s = s.interpolate(limit_direction="both").tail(MAX_TS_ROWS)
+    n_filled = int((grouped.count() == 0).sum())          # periods with no rows at all
+    if agg == "sum":
+        s = grouped.sum()               # an empty period really is 0 (no sales, no quantity)
+    else:
+        s = grouped.mean().interpolate(limit_direction="both")   # a rate/price: fill the gap
+    s = s.tail(MAX_TS_ROWS)
     s.name = value_col
     return s, freq, n_filled
 
@@ -1443,18 +1458,50 @@ def forecast_with_rows(df_raw, res):
     hist = hist.copy()
     hist[date_col] = _to_datetime_quiet(hist[date_col])
     hist = hist.sort_values(date_col)
+    # Forecast column is named after the value being forecast, e.g. "Forecast NetAmt"
+    fc_col = f"Forecast {res['value_col']}" if res.get("value_col") else "Forecast"
+
     hist["Row type"] = "Actual"
-    hist["Forecast"] = hist[date_col].map(res["test_pred"])
+    hist[fc_col] = hist[date_col].map(res["test_pred"])
+    # The forecast is ONE figure per period. Show it only on the first row of each
+    # date so summing the column does not count a day's forecast once per transaction.
+    hist.loc[hist[date_col].duplicated(), fc_col] = np.nan
 
     fc = res["forecast"]
     future = pd.DataFrame({date_col: fc.index})
     if id_col:
         future[id_col] = hist[id_col].iloc[0] if len(hist) else id_value
     future["Row type"] = "Forecast"
-    future["Forecast"] = fc.values
+    future[fc_col] = fc.values
+
+    # Fill Year / Month / Day on the forecast rows from their date, in the same
+    # style the actual rows use (e.g. APRIL vs 4 vs Apr), so each forecast sits
+    # on one complete row.
+    dates = pd.to_datetime(future[date_col])
+    for col in hist.columns:
+        key = str(col).strip().lower()
+        if key not in ("year", "month", "day") or col == date_col:
+            continue
+        if key == "year":
+            future[col] = dates.dt.year
+        elif key == "day":
+            future[col] = dates.dt.day
+        else:
+            sample = hist[col].dropna()
+            sample = sample.iloc[0] if len(sample) else None
+            if isinstance(sample, str):
+                fmt = "%b" if len(sample) <= 3 else "%B"
+                names = dates.dt.strftime(fmt)
+                if sample.isupper():
+                    names = names.str.upper()
+                elif sample.islower():
+                    names = names.str.lower()
+                future[col] = names
+            else:
+                future[col] = dates.dt.month
 
     out = pd.concat([hist, future], ignore_index=True)
-    cols = [c for c in out.columns if c != "Forecast"] + ["Forecast"]
+    cols = [c for c in out.columns if c != fc_col] + [fc_col]
     return out[cols]
 
 
@@ -1717,7 +1764,10 @@ def build_ts_report(res, value_col, date_col, n_filled):
         f"**Value forecasted:** {value_col}",
         f"**Date column:** {date_col}",
         f"**Frequency:** {res['freq']}  |  **Seasonal period:** {res['season']}  |  **Lags (ML models):** {res['n_lags']}",
-        f"**Gaps filled by interpolation:** {n_filled:,}", "",
+        "**Rows in the same period combined by:** "
+        + ("sum (totals per period)" if res.get("agg") == "sum" else "average (mean per period)"),
+        f"**Empty periods:** {n_filled:,} "
+        + ("(counted as 0)" if res.get("agg") == "sum" else "(filled by interpolation)"), "",
         "## Data Split (chronological — never shuffled)"] + split_lines + [
         "",
         "## Algorithm Selection",
@@ -1761,8 +1811,19 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
         value_col = st.selectbox("Value to forecast:", value_options, key="ts_value")
         freq_label = st.selectbox("Data frequency:", list(TS_FREQS.keys()), key="ts_freq")
 
+        agg_options = {"Sum — add up rows in the same period (amounts, quantities)": "sum",
+                       "Average — mean of rows in the same period (prices, rates)": "mean"}
+        agg_labels = list(agg_options.keys())
+        agg_label = st.selectbox(
+            "How to combine rows in the same period:", agg_labels,
+            index=0 if default_aggregation(value_col) == "sum" else 1,
+            key=f"ts_agg_{value_col}",
+            help="Your file may have many rows per day (one per sale). Sum gives the total per day; "
+                 "average gives the typical row, which is wrong for totals like NetAmt or Qty.")
+        agg = agg_options[agg_label]
+
         try:
-            series, freq, n_filled = prepare_series(df_raw, date_col, value_col, freq_label)
+            series, freq, n_filled = prepare_series(df_raw, date_col, value_col, freq_label, agg)
         except Exception as e:
             st.error(f"⚠️ {e}")
             return
@@ -1774,7 +1835,8 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
 
         st.caption(f"✅ {len(series):,} points · frequency `{freq}` · "
                    f"{series.index.min():%Y-%m-%d} → {series.index.max():%Y-%m-%d}"
-                   + (f" · {n_filled:,} empty periods interpolated" if n_filled else ""))
+                   + (f" · {n_filled:,} empty periods " + ("counted as 0" if agg == "sum" else "interpolated")
+                      if n_filled else ""))
         if len(series) < MIN_TS_ROWS:
             st.error(f"Need at least {MIN_TS_ROWS} time points; this series has {len(series)}.")
             return
@@ -1811,7 +1873,8 @@ def render_time_series_section(df_raw, raw_date_cols, total_missing):
                                           lambda p, msg: prog.progress(min(p, 1.0), text=msg),
                                           n_splits=int(ts_n_splits))
                     prog.empty()
-                    res.update({"value_col": value_col, "date_col": date_col, "n_filled": n_filled})
+                    res.update({"value_col": value_col, "date_col": date_col, "n_filled": n_filled,
+                                "agg": agg})
                     st.session_state.ts_results = res
                 except Exception as e:
                     st.error(f"⚠️ Error: {e}")
